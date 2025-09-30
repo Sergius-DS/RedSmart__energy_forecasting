@@ -254,40 +254,44 @@ forecaster = train_forecaster(y, exog)
 # --- Sidebar for User Input ---
 st.sidebar.header("Parámetros de Pronóstico")
 
+# Define the actual start of prediction required by skforecast (one step after y ends)
+skforecast_predict_start_datetime = y.index[-1] + pd.Timedelta(minutes=TIME_STEP_MINUTES)
+
 # Prediction Horizon Selection
 prediction_mode = st.sidebar.radio(
     "Seleccionar Horizonte de Pronóstico",
     ('Diario (24h)', 'Semanal (7 días)', 'Mensual (30 días)')
 )
 
+# `steps` here defines the length of the *user's requested horizon*, not total steps for skforecast
 if prediction_mode == 'Diario (24h)':
-    steps = STEPS_PER_DAY
+    user_horizon_steps = STEPS_PER_DAY
     time_label = "1 Día (48 pasos)"
 elif prediction_mode == 'Semanal (7 días)':
-    steps = STEPS_PER_DAY * 7
+    user_horizon_steps = STEPS_PER_DAY * 7
     time_label = "7 Días (336 pasos)"
 else: # Mensual
-    steps = STEPS_PER_DAY * 30
+    user_horizon_steps = STEPS_PER_DAY * 30
     time_label = "30 Días (1440 pasos)"
 
 # Prediction Start Date Selection
-last_date = y.index[-1]
-default_start_date = last_date + pd.Timedelta(minutes=TIME_STEP_MINUTES)
-
-start_date = st.sidebar.date_input(
-    "Fecha y Hora de Inicio del Pronóstico",
-    value=default_start_date,
-    min_value=default_start_date,
-    max_value=default_start_date + pd.Timedelta(days=365*2)
+# The min_value for the date input should allow selecting from the actual start of prediction onwards
+user_selected_date = st.sidebar.date_input(
+    "Fecha de Inicio del Pronóstico (Visualización)",
+    value=skforecast_predict_start_datetime, # Default to the actual next step
+    min_value=skforecast_predict_start_datetime,
+    max_value=skforecast_predict_start_datetime + pd.Timedelta(days=365*2)
 )
 
-start_datetime = pd.to_datetime(start_date) + pd.Timedelta(
-    hours=default_start_date.hour,
-    minutes=default_start_date.minute
+# Combine user selected date with the *time component of the skforecast_predict_start_datetime*
+# This ensures consistency of the time step
+user_display_start_datetime = pd.to_datetime(user_selected_date) + pd.Timedelta(
+    hours=skforecast_predict_start_datetime.hour,
+    minutes=skforecast_predict_start_datetime.minute
 )
 
 st.sidebar.markdown(f"**Pronóstico:** {time_label}")
-st.sidebar.markdown(f"**Inicio:** {start_datetime.strftime('%Y-%m-%d %H:%M')}")
+st.sidebar.markdown(f"**Inicio (visualizado):** {user_display_start_datetime.strftime('%Y-%m-%d %H:%M')}")
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Modelo:** XGBoost")
 st.sidebar.markdown(f"**Lags (Memoria):** {LAG_STEPS} ({LAG_STEPS/STEPS_PER_DAY} días)")
@@ -297,39 +301,64 @@ st.sidebar.markdown(f"**Lags (Memoria):** {LAG_STEPS} ({LAG_STEPS/STEPS_PER_DAY}
 if st.button(f"Generar Pronóstico para {time_label}"):
     with st.spinner(f"Calculando pronóstico de {time_label}..."):
 
-        # 1. Generate Exogenous Variables for the Future Period
-        exog_pred = generate_prediction_exog(start_datetime, steps)
+        # 🔴 RECALCULATE STEPS FOR SKFORECAST
+        # Calculate the total duration from skforecast's actual start to the end of user's requested horizon
+        end_of_user_horizon_datetime = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
+
+        # Ensure prediction starts at least from skforecast_predict_start_datetime
+        if end_of_user_horizon_datetime < skforecast_predict_start_datetime:
+            st.error("Error: La fecha de finalización del pronóstico es anterior a la fecha de inicio requerida por el modelo.")
+            st.stop()
+
+        time_diff = end_of_user_horizon_datetime - skforecast_predict_start_datetime
+        total_steps_for_skforecast_predict = int(time_diff.total_seconds() / (TIME_STEP_MINUTES * 60)) + 1
+
+        # Edge case: If the user_display_start_datetime is exactly skforecast_predict_start_datetime,
+        # and user_horizon_steps is 1, total_steps_for_skforecast_predict could be 1.
+        # Ensure it's at least user_horizon_steps if there's no "gap"
+        if total_steps_for_skforecast_predict < user_horizon_steps:
+             total_steps_for_skforecast_predict = user_horizon_steps
+
+
+        st.sidebar.write(f"DEBUG: skforecast will predict from {skforecast_predict_start_datetime.strftime('%Y-%m-%d %H:%M')}")
+        st.sidebar.write(f"DEBUG: Total steps for forecaster.predict(): {total_steps_for_skforecast_predict}")
+        st.sidebar.write(f"DEBUG: User selected forecast display start: {user_display_start_datetime.strftime('%Y-%m-%d %H:%M')}")
+        st.sidebar.write(f"DEBUG: User selected forecast horizon steps: {user_horizon_steps}")
+
+        # 1. Generate Exogenous Variables for the FULL period required by skforecast
+        exog_pred_full = generate_prediction_exog(skforecast_predict_start_datetime, total_steps_for_skforecast_predict)
+
 
         # --- DEBUGGING LINES (using stored fit_exog_cols and dtypes) ---
         fit_cols_list = st.session_state.get('fit_exog_cols', [])
         fit_dtypes_dict = st.session_state.get('fit_exog_dtypes', {})
-        predict_cols_list = exog_pred.columns.tolist()
-        predict_dtypes_dict = exog_pred.dtypes.to_dict()
+        predict_cols_list = exog_pred_full.columns.tolist() # Use exog_pred_full for checks
+        predict_dtypes_dict = exog_pred_full.dtypes.to_dict()
 
-        st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción: {predict_cols_list}")
-        st.sidebar.write(f"DEBUG (Predict): dtypes de las columnas de predicción: {predict_dtypes_dict}")
+        st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción (full): {predict_cols_list}")
+        st.sidebar.write(f"DEBUG (Predict): dtypes de las columnas de predicción (full): {predict_dtypes_dict}")
         st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state.get('skforecast_version')}, pandas: {st.session_state.get('pandas_version')}, holidays: {st.session_state.get('holidays_version')}, Python: {st.session_state.get('python_version')}, OS: {st.session_state.get('platform_system')}")
 
         # Additional debug for 'feriado' column values in prediction exog
-        if 'feriado' in exog_pred.columns:
-            st.sidebar.write(f"DEBUG (Predict): feriado values in exog_pred: {exog_pred['feriado'].value_counts().to_dict()}")
+        if 'feriado' in exog_pred_full.columns:
+            st.sidebar.write(f"DEBUG (Predict): feriado values in exog_pred_full: {exog_pred_full['feriado'].value_counts().to_dict()}")
             # Only show sample if there are holidays detected
-            if 1 in exog_pred['feriado'].value_counts():
-                st.sidebar.write(f"DEBUG (Predict): Sample dates with feriado=1:\n{exog_pred[exog_pred['feriado']==1].index[:5].strftime('%Y-%m-%d %H:%M').tolist()}")
+            if 1 in exog_pred_full['feriado'].value_counts():
+                st.sidebar.write(f"DEBUG (Predict): Sample dates with feriado=1:\n{exog_pred_full[exog_pred_full['feriado']==1].index[:5].strftime('%Y-%m-%d %H:%M').tolist()}")
 
 
         # Final Safety Check before prediction
-        if exog_pred.isnull().any().any():
-            st.error("❌ ERRO: `exog_pred` contiene valores nulos. Revise la generación de características.")
-            st.write(exog_pred.isnull().sum())
+        if exog_pred_full.isnull().any().any():
+            st.error("❌ ERRO: `exog_pred_full` contiene valores nulos. Revise la generación de características.")
+            st.write(exog_pred_full.isnull().sum())
             st.stop()
 
-        if not exog_pred.index.is_monotonic_increasing:
-            st.error("❌ ERRO: El índice de `exog_pred` no está ordenado monótonamente creciente. Esto es crítico.")
+        if not exog_pred_full.index.is_monotonic_increasing:
+            st.error("❌ ERRO: El índice de `exog_pred_full` no está ordenado monótonamente creciente. Esto es crítico.")
             st.stop()
 
-        if exog_pred.index.duplicated().any():
-            st.error("❌ ERRO: El índice de `exog_pred` contiene duplicados. Asegúrese de que la frecuencia sea regular.")
+        if exog_pred_full.index.duplicated().any():
+            st.error("❌ ERRO: El índice de `exog_pred_full` contiene duplicados. Asegúrese de que la frecuencia sea regular.")
             st.stop()
 
         # Ensure consistency before prediction
@@ -340,49 +369,52 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
             st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
             st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
-            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique a ordem na función create_exogenous_features.")
+            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique la orden en la función create_exogenous_features.")
             st.stop()
         elif fit_dtypes_dict != predict_dtypes_dict:
             st.error("❌ ERRO: Foi detectada uma discrepância nos TIPOS DE DADOS (dtypes) das colunas exógenas ANTES da previsão!")
             st.error(f"Dtypes usados durante o TREINAMENTO: {fit_dtypes_dict}")
-            st.error(f"Dtypes gerados para a PREVISÃO: {predict_dtypes_dict}")
+            st.error(f"Dtypes generados para a PREVISÃO: {predict_dtypes_dict}")
             st.warning("Os dtypes devem ser IDÊNTICOS para cada coluna.")
             st.stop()
         else:
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
 
             # 🔴 SOLUCIÓN MÁS ROBUSTA: Reconstruir exog_pred para asegurar la consistencia total del índice y dtypes de columnas
-            st.sidebar.write("DEBUG: Reconstruyendo exog_pred para asegurar total consistencia.")
+            st.sidebar.write("DEBUG: Reconstruyendo exog_pred_full para asegurar total consistencia.")
             try:
                 reconstructed_exog_pred = pd.DataFrame(
                     0, # Default value, will be overwritten
-                    index=exog_pred.index,
+                    index=exog_pred_full.index,
                     columns=fit_cols_list,
                 )
 
-                # Populate with actual values from the generated exog_pred
+                # Populate with actual values from the generated exog_pred_full
                 for col in fit_cols_list:
-                    if col in exog_pred.columns:
-                        reconstructed_exog_pred[col] = exog_pred[col]
+                    if col in exog_pred_full.columns:
+                        reconstructed_exog_pred[col] = exog_pred_full[col]
                 
                 # Enforce dtypes
                 for col, dtype in fit_dtypes_dict.items():
                     if col in reconstructed_exog_pred.columns:
                         reconstructed_exog_pred[col] = reconstructed_exog_pred[col].astype(dtype)
                 
-                exog_pred = reconstructed_exog_pred # Replace the original exog_pred
-                st.sidebar.write("DEBUG: Reconstrucción y ajuste de dtypes de exog_pred aplicados con éxito.")
+                exog_pred_full = reconstructed_exog_pred # Replace the original exog_pred_full
+                st.sidebar.write("DEBUG: Reconstrucción y ajuste de dtypes de exog_pred_full aplicados con éxito.")
 
             except Exception as e:
                 st.error(f"❌ ERRO: Falló la reconstrucción de columnas para la predicción: {e}")
                 st.stop()
 
-        # 2. Make Prediction (Ahora debe funcionar con la orden correcta)
-        # Conditionally pass exog based on whether the model was trained with exog
+        # 2. Make Prediction with the FULL exog_pred_full
         if fit_cols_list: # If model was trained with exogenous variables
-            predictions = forecaster.predict(steps=steps, exog=exog_pred)
+            predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict, exog=exog_pred_full)
         else: # If model was trained WITHOUT exogenous variables
-            predictions = forecaster.predict(steps=steps)
+            predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict)
+
+        # 3. Slice the full prediction and exog_pred_full for display purposes, starting from user_display_start_datetime
+        predictions = predictions_full.loc[user_display_start_datetime:].copy()
+        exog_pred_sliced = exog_pred_full.loc[user_display_start_datetime:].copy() # For debugging if needed
 
 
         # 3. Display Results
@@ -412,9 +444,9 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             # Plot the forecast
             if not predictions.empty:
                 predictions.plot(ax=ax, label=f'Pronóstico {prediction_mode} (MW)', color='red', linestyle='--')
-                ax.set_title(f'Pronóstico de Demanda Eléctrica: {start_datetime.strftime("%Y-%m-%d")} a {predictions.index[-1].strftime("%Y-%m-%d")}')
+                ax.set_title(f'Pronóstico de Demanda Eléctrica: {user_display_start_datetime.strftime("%Y-%m-%d")} a {predictions.index[-1].strftime("%Y-%m-%d")}')
             else:
-                st.warning("No se generaron predicciones.")
+                st.warning("No se generaron predicciones para el periodo solicitado.")
                 ax.set_title(f'Pronóstico de Demanda Eléctrica: No se generaron predicciones')
 
             ax.set_xlabel('Fecha y Hora')
@@ -581,6 +613,7 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
