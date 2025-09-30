@@ -20,33 +20,93 @@ TIME_STEP_MINUTES = 30
 STEPS_PER_DAY = 48
 EXCEL_FILE = "DemandaCOES_.xlsx"
 
+# Mapping for day name dummies (using numbers for natural sorting order)
+DAYS_TRANSLATION = {
+    'Monday': '1Lunes',
+    'Tuesday': '2Martes',
+    'Wednesday': '3Miércoles',
+    'Thursday': '4Jueves',
+    'Friday': '5Viernes',
+    'Saturday': '6Sábado',
+    'Sunday': '0Domingo'
+}
+
+# 1. Get the sorted translated day names
+all_translated_days = sorted(DAYS_TRANSLATION.values())
+# 2. Prepend 'dia_' to get the final dummy column names
+all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
+
+# List of all possible exogenous features
+ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
+
+# Force alphabetical ordering, which corresponds to the model's order.
+REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
+
+
 # --- Feature Engineering ---
 def create_exogenous_features(data):
+    """
+    Creates the 'ciclo', day dummies, and 'feriado' features,
+    and applies the required (alphabetical) ordering.
+    """
     data_with_features = data.copy()
     
-    # Cyclic feature
+    # 1. Cyclic feature
     data_with_features['ciclo'] = data_with_features.index.map(
         lambda t: (t.hour * 60 + t.minute) / (24 * 60)
     )
     
-    # Day of week dummies
-    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    spanish_days = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+    # 2. Daily Dummies (One-Hot Encoding)
+    data_with_features['dia'] = data_with_features.index.day_name().map(DAYS_TRANSLATION)
+    # Ensure all possible day values are known to pandas for consistent dummy creation
+    data_with_features['dia'] = pd.Categorical(
+        data_with_features['dia'],
+        categories=all_translated_days
+    )
+    data_with_features = pd.get_dummies(data_with_features, columns=['dia'], dtype=int)
     
-    for i, (eng, esp) in enumerate(zip(day_names, spanish_days)):
-        data_with_features[f'dia_{esp}'] = (data_with_features.index.day_name() == eng).astype(int)
-    
-    # Holiday feature
+    # 3. Holiday Feature (Robust handling)
     start_year = data_with_features.index.min().year - 1
     end_year = data_with_features.index.max().year + 2
-    pe_holidays = holidays.Peru(years=range(start_year, end_year), observed=True)
-    data_with_features['feriado'] = data_with_features.index.normalize().isin(pe_holidays).astype(int)
+
+    pe_holidays_from_package = {}
+    try:
+        pe_holidays_from_package = holidays.Peru(years=range(start_year, end_year + 1), observed=True)
+    except Exception: # Simplified warning for a simple app
+        # st.warning(f"Error loading holidays from package: {e}. Using fallback for some dates.")
+        pe_holidays_from_package = {}
+
+    fixed_holidays_dates = []
+    for year in range(start_year, end_year + 1):
+        fixed_holidays_dates.extend([
+            pd.to_datetime(f"{year}-01-01").date(),   # Año Nuevo
+            pd.to_datetime(f"{year}-05-01").date(),   # Día del Trabajo
+            pd.to_datetime(f"{year}-07-28").date(),   # Fiestas Patrias - Independencia
+            pd.to_datetime(f"{year}-07-29").date(),   # Fiestas Patrias - Batalla de Ayacucho
+            pd.to_datetime(f"{year}-08-30").date(),   # Santa Rosa de Lima
+            pd.to_datetime(f"{year}-10-08").date(),   # Combate de Angamos
+            pd.to_datetime(f"{year}-11-01").date(),   # Día de Todos los Santos
+            pd.to_datetime(f"{year}-12-08").date(),   # Inmaculada Concepción
+            pd.to_datetime(f"{year}-12-25").date(),   # Navidad
+        ])
+    
+    known_holidays = set(pe_holidays_from_package.keys()) if isinstance(pe_holidays_from_package, dict) else set(pe_holidays_from_package)
+    known_holidays.update(fixed_holidays_dates)
+
+    data_with_features['feriado'] = data_with_features.index.normalize().isin(known_holidays).astype(int)
     
     # Drop target column if present
     if 'Demand' in data_with_features.columns:
         exog = data_with_features.drop(columns=['Demand'])
     else:
         exog = data_with_features
+        
+    # --- CRITICAL FIX: Column ordering enforcement ---
+    for col in REQUIRED_EXOG_COLS:
+        if col not in exog.columns:
+            exog[col] = 0
+            
+    exog = exog[REQUIRED_EXOG_COLS]
         
     return exog
 
@@ -59,7 +119,15 @@ def load_data():
         data.set_index('FECHA', inplace=True)
         data.rename(columns={'EJECUTADO': 'Demand'}, inplace=True)
         data = data.asfreq(f"{TIME_STEP_MINUTES}min")
-        return data['Demand'], create_exogenous_features(data[['Demand']])
+        
+        y = data['Demand'].copy()
+        exog = create_exogenous_features(data[['Demand']])
+        
+        # Store fit_exog_cols and dtypes for consistency in prediction
+        st.session_state['fit_exog_cols'] = exog.columns.tolist()
+        st.session_state['fit_exog_dtypes'] = exog.dtypes.to_dict()
+
+        return y, exog
     except FileNotFoundError:
         st.error(f"Error: No se encontró el archivo '{EXCEL_FILE}'")
         return None, None
@@ -75,28 +143,73 @@ def train_model(y_train, x_train):
         n_jobs=-1
     )
     forecaster = ForecasterRecursive(regressor=model, lags=LAG_STEPS)
-    forecaster.fit(y=y_train, exog=x_train)
+    
+    if not x_train.empty:
+        forecaster.fit(y=y_train, exog=x_train)
+    else:
+        forecaster.fit(y=y_train)
+        
     return forecaster
 
 # --- Prediction ---
-def predict_future(forecaster, start_date, steps):
-    # Create future dates
-    future_dates = pd.date_range(
-        start=start_date,
-        periods=steps,
-        freq=f"{TIME_STEP_MINUTES}min"
-    )
+def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps):
     
-    # Create exogenous features for future
-    future_data = pd.DataFrame(index=future_dates)
-    exog_future = create_exogenous_features(future_data)
+    # Calculate the end of the user's requested display horizon
+    end_of_user_display_horizon = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
+
+    # Calculate total steps needed for skforecast, starting from skforecast_predict_start_datetime
+    total_seconds_to_predict = (end_of_user_display_horizon - skforecast_predict_start_datetime).total_seconds()
+    # Add 1 to steps for inclusivity
+    total_steps_for_skforecast_predict = int(total_seconds_to_predict / (TIME_STEP_MINUTES * 60)) + 1
     
-    # Make prediction
-    return forecaster.predict(steps=steps, exog=exog_future)
+    # Ensure at least 1 step if start and end are the same
+    if total_steps_for_skforecast_predict < 1 and skforecast_predict_start_datetime <= end_of_user_display_horizon:
+        total_steps_for_skforecast_predict = 1
+
+    # Generate Exogenous Variables for the FULL period required by skforecast
+    exog_pred_full = generate_prediction_exog(skforecast_predict_start_datetime, total_steps_for_skforecast_predict)
+
+    # --- Consistency checks and reconstruction (simplified) ---
+    fit_cols_list = st.session_state.get('fit_exog_cols', [])
+    fit_dtypes_dict = st.session_state.get('fit_exog_dtypes', {})
+
+    if not fit_cols_list and not exog_pred_full.empty:
+        # Model trained without exog, but exog_pred_full is not empty -> should not happen if create_exogenous_features is consistent
+        st.error("Error Interno: El modelo fue entrenado sin exógenas, pero se generaron exógenas inesperadamente para la predicción.")
+        st.stop()
+    elif fit_cols_list and exog_pred_full.empty:
+        # Model trained with exog, but exog_pred_full is empty -> problem in generate_prediction_exog
+        st.error("Error Interno: El modelo fue entrenado con exógenas, pero no se pudieron generar exógenas para la predicción.")
+        st.stop()
+    elif fit_cols_list: # If model was trained with exogenous variables, ensure consistency
+        reconstructed_exog_pred = pd.DataFrame(
+            0, # Default value
+            index=exog_pred_full.index,
+            columns=fit_cols_list,
+        )
+        for col in fit_cols_list:
+            if col in exog_pred_full.columns:
+                reconstructed_exog_pred[col] = exog_pred_full[col]
+        for col, dtype in fit_dtypes_dict.items():
+            if col in reconstructed_exog_pred.columns:
+                reconstructed_exog_pred[col] = reconstructed_exog_pred[col].astype(dtype)
+        exog_pred_full = reconstructed_exog_pred
+
+    # Make Prediction with the FULL exog_pred_full
+    if fit_cols_list:
+        predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict, exog=exog_pred_full)
+    else:
+        predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict)
+
+    # Slice the full prediction for display purposes, starting from user_display_start_datetime
+    predictions = predictions_full.loc[user_display_start_datetime:].copy()
+    
+    return predictions
 
 # --- Main App ---
 # Load data and train model
 y, exog = load_data()
+
 if y is not None:
     forecaster = train_model(y, exog)
     
@@ -116,27 +229,31 @@ if y is not None:
         "1 mes": STEPS_PER_DAY * 30
     }
     
-    steps = horizon_map[horizon]
+    user_horizon_steps = horizon_map[horizon] # Renamed to be clear it's the user's desired horizon
     
-    # Default start is next time step after last data point
-    default_start = y.index[-1] + pd.Timedelta(minutes=TIME_STEP_MINUTES)
+    # Define the actual start of prediction required by skforecast (one step after y ends)
+    skforecast_predict_start_datetime = y.index[-1] + pd.Timedelta(minutes=TIME_STEP_MINUTES)
     
-    start_date = st.sidebar.date_input(
-        "Fecha de inicio:",
-        value=default_start,
-        min_value=default_start
+    user_selected_date = st.sidebar.date_input(
+        "Fecha de inicio (visualización):",
+        value=skforecast_predict_start_datetime.date(), # Default to the date of the actual next step
+        min_value=skforecast_predict_start_datetime.date()
     )
     
-    # Add time component
-    start_datetime = pd.to_datetime(start_date).replace(
-        hour=default_start.hour,
-        minute=default_start.minute
+    user_display_start_datetime = pd.to_datetime(user_selected_date).replace(
+        hour=skforecast_predict_start_datetime.hour,
+        minute=skforecast_predict_start_datetime.minute
     )
     
     # Prediction button
     if st.sidebar.button("Generar Pronóstico", type="primary"):
         with st.spinner("Calculando pronóstico..."):
-            predictions = predict_future(forecaster, start_datetime, steps)
+            predictions = predict_future(
+                forecaster, 
+                skforecast_predict_start_datetime, 
+                user_display_start_datetime, 
+                user_horizon_steps
+            )
             
             # Display results
             col1, col2 = st.columns([2, 1])
@@ -144,48 +261,66 @@ if y is not None:
             with col1:
                 st.subheader(f"Pronóstico - {horizon}")
                 
-                # Plot
                 fig, ax = plt.subplots(figsize=(12, 6))
-                predictions.plot(ax=ax, color='red', linewidth=2)
-                ax.set_title(f'Pronóstico de Demanda Eléctrica\n{start_datetime.strftime("%d/%m/%Y")} - {predictions.index[-1].strftime("%d/%m/%Y")}')
+                
+                # Plot historical data up to the start of the user's requested forecast period
+                context_end_for_plot = user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
+                # Show a reasonable window of historical context, e.g., last 30 days before forecast starts
+                context_start_for_plot = max(y.index.min(), context_end_for_plot - pd.Timedelta(days=30))
+                
+                y_context_for_plot = y.loc[context_start_for_plot : context_end_for_plot]
+
+                if not y_context_for_plot.empty:
+                    y_context_for_plot.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                
+                if not predictions.empty:
+                    predictions.plot(ax=ax, label=f'Pronóstico {horizon} (MW)', color='red', linewidth=2)
+                    ax.set_title(f'Pronóstico de Demanda Eléctrica\n{user_display_start_datetime.strftime("%d/%m/%Y %H:%M")} - {predictions.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                else:
+                    st.warning("No se generaron predicciones para el período solicitado.")
+                    ax.set_title(f'Pronóstico de Demanda Eléctrica: No se generaron predicciones')
+
                 ax.set_xlabel('Fecha y Hora')
                 ax.set_ylabel('Demanda (MW)')
+                ax.legend()
                 ax.grid(True, alpha=0.3)
                 st.pyplot(fig)
             
             with col2:
-                st.subheader("Estadísticas")
-                st.metric("Demanda Promedio", f"{predictions.mean():.0f} MW")
-                st.metric("Pico Máximo", f"{predictions.max():.0f} MW")
-                st.metric("Valle Mínimo", f"{predictions.min():.0f} MW")
-                st.metric("Rango", f"{predictions.max() - predictions.min():.0f} MW")
-            
-            # Data table
+                st.subheader("Estadísticas del Pronóstico")
+                if not predictions.empty:
+                    st.metric("Demanda Promedio", f"{predictions.mean():,.0f} MW")
+                    st.metric("Pico Máximo", f"{predictions.max():,.0f} MW")
+                    st.metric("Valle Mínimo", f"{predictions.min():,.0f} MW")
+                    st.metric("Rango", f"{predictions.max() - predictions.min():,.0f} MW")
+                else:
+                    st.markdown("No hay estadísticas para mostrar.")
+
             st.subheader("Datos del Pronóstico")
             predictions_df = predictions.to_frame('Demanda (MW)')
             predictions_df.index.name = 'Fecha-Hora'
             
-            # Format for display
             display_df = predictions_df.copy()
             display_df['Demanda (MW)'] = display_df['Demanda (MW)'].round(2)
             
-            st.dataframe(display_df, use_container_width=True)
-            
-            # Download button
-            csv = predictions_df.to_csv().encode('utf-8')
-            st.download_button(
-                "📥 Descargar CSV",
-                data=csv,
-                file_name=f'pronostico_demanda_{start_datetime.strftime("%Y%m%d")}.csv',
-                mime='text/csv'
-            )
+            if not display_df.empty:
+                st.dataframe(display_df, use_container_width=True)
+                csv = predictions_df.to_csv().encode('utf-8')
+                st.download_button(
+                    "📥 Descargar CSV",
+                    data=csv,
+                    file_name=f'pronostico_demanda_{user_display_start_datetime.strftime("%Y%m%d")}.csv',
+                    mime='text/csv'
+                )
+            else:
+                st.warning("No hay pronósticos para mostrar o descargar.")
     
     # Model info
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Información del Modelo:**")
     st.sidebar.markdown(f"• Lags utilizados: {LAG_STEPS}")
-    st.sidebar.markdown(f"• Último dato: {y.index[-1].strftime('%d/%m/%Y %H:%M')}")
-    st.sidebar.markdown(f"• Total de datos: {len(y):,}")
+    st.sidebar.markdown(f"• Último dato histórico: {y.index[-1].strftime('%d/%m/%Y %H:%M')}")
+    st.sidebar.markdown(f"• Total de datos históricos: {len(y):,}")
     
 else:
     st.error("No se pudieron cargar los datos. Verifique que el archivo Excel esté en el directorio correcto.")
