@@ -74,8 +74,37 @@ def create_exogenous_features(data):
     # 3. Holiday Feature
     start_year = data_with_features.index.min().year - 1
     end_year = data_with_features.index.max().year + 2
-    pe = holidays.Peru(years=range(start_year, end_year), observed=True)
-    data_with_features['feriado'] = data_with_features.index.normalize().isin(pe).astype(int)
+
+    # Try to get holidays from the package
+    pe_holidays_from_package = {}
+    try:
+        pe_holidays_from_package = holidays.Peru(years=range(start_year, end_year + 1), observed=True)
+    except Exception as e:
+        st.warning(f"Error loading holidays from package: {e}. Using fallback for some dates.")
+        pe_holidays_from_package = {} # Ensure it's an empty dict if error
+
+    # Fallback: manually define known fixed holidays (as dates)
+    # This also handles cases where the package might not have data for far future years
+    fixed_holidays_dates = []
+    for year in range(start_year, end_year + 1):
+        fixed_holidays_dates.extend([
+            pd.to_datetime(f"{year}-01-01").date(),   # Año Nuevo
+            pd.to_datetime(f"{year}-05-01").date(),   # Día del Trabajo
+            pd.to_datetime(f"{year}-07-28").date(),   # Fiestas Patrias - Independencia
+            pd.to_datetime(f"{year}-07-29").date(),   # Fiestas Patrias - Batalla de Ayacucho
+            pd.to_datetime(f"{year}-08-30").date(),   # Santa Rosa de Lima
+            pd.to_datetime(f"{year}-10-08").date(),   # Combate de Angamos
+            pd.to_datetime(f"{year}-11-01").date(),   # Día de Todos los Santos
+            pd.to_datetime(f"{year}-12-08").date(),   # Inmaculada Concepción
+            pd.to_datetime(f"{year}-12-25").date(),   # Navidad
+        ])
+    
+    # Combine holidays from package and fixed holidays
+    known_holidays = set(pe_holidays_from_package.keys()) if isinstance(pe_holidays_from_package, dict) else set(pe_holidays_from_package)
+    known_holidays.update(fixed_holidays_dates)
+
+    # Create 'feriado' column based on combined holidays
+    data_with_features['feriado'] = data_with_features.index.normalize().isin(known_holidays).astype(int)
 
     # Drop the original 'Demand' column
     if 'Demand' in data_with_features.columns:
@@ -83,14 +112,11 @@ def create_exogenous_features(data):
     else:
         exog = data_with_features
 
-    # --- CRITICAL FIX IMPLEMENTATION: Column ordering enforcement ---
-
-    # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
+    # --- CRITICAL FIX: Column ordering enforcement ---
     for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
             exog[col] = 0
 
-    # 2. Enforce the required column order (Alphabetical)
     exog = exog[REQUIRED_EXOG_COLS]
 
     return exog
@@ -156,12 +182,17 @@ def train_forecaster(y_train, x_train):
         st.session_state['skforecast_version'] = skforecast.__version__
     except AttributeError:
         st.session_state['skforecast_version'] = "N/A (check pip list)"
+    try:
+        import holidays as h_lib # avoid name collision
+        st.session_state['holidays_version'] = h_lib.__version__
+    except AttributeError:
+        st.session_state['holidays_version'] = "N/A (check pip list)"
 
     st.session_state['pandas_version'] = pd.__version__
     st.session_state['python_version'] = sys.version
     st.session_state['platform_system'] = platform.system()
 
-    st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state['skforecast_version']}, pandas: {st.session_state['pandas_version']}, Python: {st.session_state['python_version']}, OS: {st.session_state['platform_system']}")
+    st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state['skforecast_version']}, pandas: {st.session_state['pandas_version']}, holidays: {st.session_state['holidays_version']}, Python: {st.session_state['python_version']}, OS: {st.session_state['platform_system']}")
 
     return forecaster
 
@@ -174,6 +205,9 @@ def generate_prediction_exog(start_date, steps):
         periods=steps,
         freq=f"{TIME_STEP_MINUTES}min"
     )
+
+    # Ensure no duplicates or gaps in the generated index
+    future_index = future_index.drop_duplicates()
 
     future_data = pd.DataFrame(index=future_index)
     exog_pred = create_exogenous_features(future_data)
@@ -274,8 +308,29 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
         st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción: {predict_cols_list}")
         st.sidebar.write(f"DEBUG (Predict): dtypes de las columnas de predicción: {predict_dtypes_dict}")
-        st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state.get('skforecast_version')}, pandas: {st.session_state.get('pandas_version')}, Python: {st.session_state.get('python_version')}, OS: {st.session_state.get('platform_system')}")
+        st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state.get('skforecast_version')}, pandas: {st.session_state.get('pandas_version')}, holidays: {st.session_state.get('holidays_version')}, Python: {st.session_state.get('python_version')}, OS: {st.session_state.get('platform_system')}")
 
+        # Additional debug for 'feriado' column values in prediction exog
+        if 'feriado' in exog_pred.columns:
+            st.sidebar.write(f"DEBUG (Predict): feriado values in exog_pred: {exog_pred['feriado'].value_counts().to_dict()}")
+            # Only show sample if there are holidays detected
+            if 1 in exog_pred['feriado'].value_counts():
+                st.sidebar.write(f"DEBUG (Predict): Sample dates with feriado=1:\n{exog_pred[exog_pred['feriado']==1].index[:5].strftime('%Y-%m-%d %H:%M').tolist()}")
+
+
+        # Final Safety Check before prediction
+        if exog_pred.isnull().any().any():
+            st.error("❌ ERRO: `exog_pred` contiene valores nulos. Revise la generación de características.")
+            st.write(exog_pred.isnull().sum())
+            st.stop()
+
+        if not exog_pred.index.is_monotonic_increasing:
+            st.error("❌ ERRO: El índice de `exog_pred` no está ordenado monótonamente creciente. Esto es crítico.")
+            st.stop()
+
+        if exog_pred.index.duplicated().any():
+            st.error("❌ ERRO: El índice de `exog_pred` contiene duplicados. Asegúrese de que la frecuencia sea regular.")
+            st.stop()
 
         # Ensure consistency before prediction
         if not fit_cols_list and not predict_cols_list:
@@ -297,12 +352,8 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
 
             # 🔴 SOLUCIÓN MÁS ROBUSTA: Reconstruir exog_pred para asegurar la consistencia total del índice y dtypes de columnas
-            # Esto es más agresivo que solo reindexar y debería eliminar cualquier diferencia sutil
             st.sidebar.write("DEBUG: Reconstruyendo exog_pred para asegurar total consistencia.")
             try:
-                # Create a new DataFrame with the target index and columns, filled with zeros
-                # Then populate it with values from the original exog_pred
-                # This ensures the new DataFrame has a fresh pandas.Index identical to fit_cols_list
                 reconstructed_exog_pred = pd.DataFrame(
                     0, # Default value, will be overwritten
                     index=exog_pred.index,
@@ -530,7 +581,6 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
-
 
 
 
