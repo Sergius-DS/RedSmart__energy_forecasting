@@ -38,8 +38,7 @@ all_translated_days = sorted(DAYS_TRANSLATION.values())
 # 2. Prepend 'dia_' to get the final dummy column names
 all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 
-# 🔴 ÚLTIMA CORRECCIÓN: Definición de la orden requerida.
-# Intentamos la orden más lógica: 'ciclo', 'feriado', y luego todos los dummies de día.
+# 🔴 REQUERIDO: Lista de columnas en el orden asumido (ciclo, feriado, luego días ordenados).
 REQUIRED_EXOG_COLS = [
     'ciclo',
     'feriado',
@@ -81,7 +80,7 @@ def create_exogenous_features(data):
     else:
         exog = data_with_features
         
-    # --- CRITICAL FIX IMPLEMENTATION ---
+    # --- CRITICAL FIX IMPLEMENTATION: Column ordering enforcement ---
     
     # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
     for col in REQUIRED_EXOG_COLS:
@@ -133,9 +132,18 @@ def train_forecaster(y_train, x_train):
     )
 
     forecaster.fit(y=y_train, exog=x_train)
+    
+    # --- DEBUGGING LINE (FIT) ---
+    # Captura las columnas que el modelo GUARDÓ durante el entrenamiento
+    try:
+        st.sidebar.write(f"DEBUG (Fit): Type of forecaster.exog_cols: {type(forecaster.exog_cols)}")
+        st.sidebar.write(f"DEBUG (Fit): forecaster.exog_cols.tolist(): {forecaster.exog_cols.tolist()}")
+    except Exception as e:
+        st.sidebar.write(f"DEBUG (Fit): Error al leer exog_cols: {e}")
+        
     return forecaster
 
-# --- Prediction and Metrics (Rest of the script remains the same) ---
+# --- Prediction and Metrics ---
 
 def generate_prediction_exog(start_date, steps):
     """Generates a future date range and the required exogenous variables."""
@@ -232,7 +240,31 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         # 1. Generate Exogenous Variables for the Future Period
         exog_pred = generate_prediction_exog(start_datetime, steps)
 
-        # 2. Make Prediction (Should now work with the correct column order)
+        # --- DEBUGGING LINES (PREDICT) ---
+        # Captura las columnas generadas para la predicción
+        st.sidebar.write(f"DEBUG (Predict): Type of exog_pred.columns: {type(exog_pred.columns)}")
+        st.sidebar.write(f"DEBUG (Predict): exog_pred.columns.tolist(): {exog_pred.columns.tolist()}")
+
+        # Manual check for column consistency before calling predict
+        try:
+            fit_cols_list = forecaster.exog_cols.tolist()
+        except AttributeError:
+             st.error("Error de Atributo: forecaster.exog_cols no es accesible. Posiblemente caché o versión antigua de skforecast. No se puede realizar la comprobación manual.")
+             st.stop()
+             
+        predict_cols_list = exog_pred.columns.tolist()
+
+        if fit_cols_list != predict_cols_list:
+            st.error("❌ ERROR: Detección manual de desajuste de columnas antes de la predicción!")
+            st.error(f"FIT Columns (Modelo): {fit_cols_list}")
+            st.error(f"PREDICT Columns (Generadas): {predict_cols_list}")
+            st.warning("El orden DEBE ser IDÉNTICO para skforecast. Revise los logs de la barra lateral.")
+            st.stop() # Stop the app to clearly show the error
+        else:
+            st.sidebar.write("DEBUG: La comprobación manual de columnas pasó. Los nombres y el orden son idénticos.")
+        # ------------------------------------
+
+        # 2. Make Prediction 
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -336,6 +368,7 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
 
 
