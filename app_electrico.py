@@ -43,7 +43,7 @@ all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 # Lista de todas as possíveis características exógenas
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
-# 🔴 SOLUCIÓN DEFINITIVA: Forzar la ordenación alfabética, que corresponde à ordem do modelo.
+# 🔴 SOLUÇÃO DEFINITIVA: Forçar a ordenação alfabética, que corresponde à ordem do modelo.
 # ['ciclo', 'dia_0Domingo', 'dia_1Lunes', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
@@ -285,13 +285,13 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
             st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
             st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
-            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique a ordem na função create_exogenous_features.")
+            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique a ordem na función create_exogenous_features.")
             st.stop()
         elif fit_dtypes_dict != predict_dtypes_dict:
             st.error("❌ ERRO: Foi detectada uma discrepância nos TIPOS DE DADOS (dtypes) das colunas exógenas ANTES da previsão!")
             st.error(f"Dtypes usados durante o TREINAMENTO: {fit_dtypes_dict}")
             st.error(f"Dtypes gerados para a PREVISÃO: {predict_dtypes_dict}")
-            st.warning("Os dtypes devem ser IDÉNTICOS para cada coluna.")
+            st.warning("Os dtypes devem ser IDÊNTICOS para cada coluna.")
             st.stop()
         else:
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
@@ -406,8 +406,6 @@ min_data_needed = LAG_STEPS + steps_test + 1
 
 if len(y) < min_data_needed:
     st.warning(f"No hay suficientes datos históricos (mínimo {min_data_needed} puntos) para calcular el rendimiento histórico sobre la última semana ({steps_test} pasos) más los lags requeridos ({LAG_STEPS} pasos).")
-    # You might want to stop here or just display a message
-    # For now, let's just bypass the calculation and display a warning.
     st.markdown("No se pudo calcular el rendimiento histórico. Asegúrese de que el archivo `DemandaCOES_.xlsx` contenga al menos 7 días de datos para el test set + 2 días para los lags + datos para el train set.")
 else:
     y_test = y[-steps_test:]
@@ -486,16 +484,25 @@ else:
         # Display the historical plot
         st.subheader("Gráfica de Ajuste Histórico (Última Semana)")
         fig_hist, ax_hist = plt.subplots(figsize=(14, 6))
-        y_test.plot(ax=ax_hist, label='Valor Real (MW)', color='blue')
-        predictions_hist.plot(ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
+        
+        # Ensure y_test is not empty before plotting
+        if not y_test.empty:
+            y_test.plot(ax=ax_hist, label='Valor Real (MW)', color='blue')
+        else:
+            st.warning("No hay datos reales para mostrar en la gráfica histórica.")
+
+        # Corrected line: Use ax=ax_hist
+        predictions_hist.plot(ax=ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
+        
         ax_hist.set_title('Rendimiento del Modelo en el Conjunto de Prueba')
         ax_hist.set_xlabel('Fecha y Hora')
-        ax_hist.set_ylabel('Demanda (MW)') # Corregido de ax_ylabel a ax_hist.set_ylabel
+        ax_hist.set_ylabel('Demanda (MW)')
         ax_hist.legend()
         ax_hist.grid(True)
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
