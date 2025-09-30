@@ -42,6 +42,7 @@ all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
 # Force alphabetical ordering, which corresponds to the model's order.
+# Ordem de colunas esperada: ['ciclo', 'dia_0Domingo', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
 
@@ -73,23 +74,23 @@ def create_exogenous_features(data):
 
     pe_holidays_from_package = {}
     try:
+        # Use +1 to ensure the current end year is included
         pe_holidays_from_package = holidays.Peru(years=range(start_year, end_year + 1), observed=True)
-    except Exception: # Simplified warning for a simple app
-        # st.warning(f"Error loading holidays from package: {e}. Using fallback for some dates.")
+    except Exception:
         pe_holidays_from_package = {}
 
     fixed_holidays_dates = []
     for year in range(start_year, end_year + 1):
         fixed_holidays_dates.extend([
-            pd.to_datetime(f"{year}-01-01").date(),   # Año Nuevo
-            pd.to_datetime(f"{year}-05-01").date(),   # Día del Trabajo
-            pd.to_datetime(f"{year}-07-28").date(),   # Fiestas Patrias - Independencia
-            pd.to_datetime(f"{year}-07-29").date(),   # Fiestas Patrias - Batalla de Ayacucho
-            pd.to_datetime(f"{year}-08-30").date(),   # Santa Rosa de Lima
-            pd.to_datetime(f"{year}-10-08").date(),   # Combate de Angamos
-            pd.to_datetime(f"{year}-11-01").date(),   # Día de Todos los Santos
-            pd.to_datetime(f"{year}-12-08").date(),   # Inmaculada Concepción
-            pd.to_datetime(f"{year}-12-25").date(),   # Navidad
+            pd.to_datetime(f"{year}-01-01").date(),    # Año Nuevo
+            pd.to_datetime(f"{year}-05-01").date(),    # Día del Trabajo
+            pd.to_datetime(f"{year}-07-28").date(),    # Fiestas Patrias - Independencia
+            pd.to_datetime(f"{year}-07-29").date(),    # Fiestas Patrias - Batalla de Ayacucho
+            pd.to_datetime(f"{year}-08-30").date(),    # Santa Rosa de Lima
+            pd.to_datetime(f"{year}-10-08").date(),    # Combate de Angamos
+            pd.to_datetime(f"{year}-11-01").date(),    # Día de Todos los Santos
+            pd.to_datetime(f"{year}-12-08").date(),    # Inmaculada Concepción
+            pd.to_datetime(f"{year}-12-25").date(),    # Navidad
         ])
     
     known_holidays = set(pe_holidays_from_package.keys()) if isinstance(pe_holidays_from_package, dict) else set(pe_holidays_from_package)
@@ -168,7 +169,7 @@ def generate_prediction_exog(start_date_for_exog, steps_for_exog):
     future_data = pd.DataFrame(index=future_index)
     exog_pred = create_exogenous_features(future_data)
     
-    # Safety check on generated exog
+    # Safety checks
     if exog_pred.isnull().any().any():
         st.error("Error Interno: `exog_pred` contiene valores nulos después de la generación de características.")
         st.write(exog_pred.isnull().sum())
@@ -313,94 +314,96 @@ if y is not None:
                 user_horizon_steps
             )
             
-            # Display results
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.subheader(f"Pronóstico - {horizon}")
-                
-                fig, ax = plt.subplots(figsize=(12, 6))
-                
-                # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción dividida
-                if not y.empty and not predictions_full.empty:
-                    context_days = 7  # Show last 7 days of historical data
-                    context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
-                    
-                    y_context = y.loc[context_start:y.index[-1]]
-                    
-                    if not y_context.empty: # Plot only if there's actual context data
-                        y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7, linewidth=1.5)
-                    
-                    # Define the gap prediction (from historical end to user's display start)
-                    # This is the part skforecast predicted to bridge the gap
-                    predictions_gap = predictions_full.loc[
-                        skforecast_predict_start_datetime : user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
-                    ]
-                    
-                    # Plot the gap prediction in blue
-                    if not predictions_gap.empty:
-                        predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico y inicio seleccionado)', linewidth=2)
-                    
-                    # Plot the actual user-requested forecast in red
-                    if not predictions.empty:
-                        predictions.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)', linewidth=2)
-                    
-                    # Add vertical line to show where historical data ends
-                    ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
-                    
-                    # Set appropriate x-axis limits to focus on the relevant period
-                    # Start from context_start or the beginning of predictions_gap if it exists
-                    plot_start_limit = context_start
-                    if not predictions_gap.empty:
-                         plot_start_limit = min(context_start, predictions_gap.index.min()) # Ensure we don't cut off gap if it starts earlier
-                    
-                    ax.set_xlim(plot_start_limit, predictions_full.index[-1])
-                    
-                    ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{plot_start_limit.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
+            # --- Display results - Plot first ---
+            st.subheader(f"Gráfica de Pronóstico - {horizon}")
+            fig, ax = plt.subplots(figsize=(12, 6))
 
-                elif not y.empty: # Only historical data available (no predictions)
-                    context_days = 30 # Show a larger context if no predictions are made
-                    context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
-                    y_context = y.loc[context_start:y.index[-1]]
+            # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción dividida
+            if not y.empty and not predictions_full.empty:
+                context_days = 7  # Show last 7 days of historical data
+                context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
+                
+                y_context = y.loc[context_start:y.index[-1]]
+                
+                if not y_context.empty: # Plot only if there's actual context data
+                    y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7, linewidth=1.5)
                     
-                    if not y_context.empty:
-                        y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
-                        ax.set_title(f'Demanda Eléctrica Histórica (Últimos {context_days} días)\n{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
-                    else:
-                        st.warning("No hay datos históricos para mostrar.")
-                        ax.set_title('No hay datos para mostrar')
-                else: # No historical data
-                    st.warning("No hay datos históricos ni predicciones para mostrar.")
+                # Define the gap prediction (from historical end to user's display start)
+                predictions_gap = predictions_full.loc[
+                    skforecast_predict_start_datetime : user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
+                ]
+                
+                # Plot the gap prediction in blue
+                if not predictions_gap.empty:
+                    predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico y inicio seleccionado)', linewidth=2)
+                    
+                # Plot the actual user-requested forecast in red
+                if not predictions.empty:
+                    predictions.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)', linewidth=2)
+                    
+                # Add vertical line to show where historical data ends
+                ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
+                
+                # Set appropriate x-axis limits to focus on the relevant period
+                plot_start_limit = context_start
+                if not predictions_gap.empty: 
+                    plot_start_limit = min(context_start, predictions_gap.index.min())
+                
+                ax.set_xlim(plot_start_limit, predictions_full.index[-1])
+                
+                ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{plot_start_limit.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
+
+            elif not y.empty: # Only historical data available (no predictions)
+                context_days = 30
+                context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
+                y_context = y.loc[context_start:y.index[-1]]
+                
+                if not y_context.empty:
+                    y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                    ax.set_title(f'Demanda Eléctrica Histórica (Últimos {context_days} días)\n{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                else:
+                    st.warning("No hay datos históricos para mostrar.")
                     ax.set_title('No hay datos para mostrar')
+            else: # No historical data
+                st.warning("No hay datos históricos ni predicciones para mostrar.")
+                ax.set_title('No hay datos para mostrar')
 
-                ax.set_xlabel('Fecha y Hora')
-                ax.set_ylabel('Demanda (MW)')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                st.pyplot(fig)
+            ax.set_xlabel('Fecha y Hora')
+            ax.set_ylabel('Demanda (MW)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+
+            # -----------------------------------------------------------
+            # --- Statistics in 2 columns below the plot (NEW SECTION) ---
+            # -----------------------------------------------------------
+            st.subheader("Estadísticas del Pronóstico")
+            col_stat1, col_stat2 = st.columns(2)
             
-            with col2:
-                st.subheader("Estadísticas del Pronóstico")
-                if not predictions.empty: # Use predictions (sliced) for stats relevant to user's selected horizon
+            with col_stat1:
+                st.markdown("**Pronóstico Actual**")
+                if not predictions.empty:
                     st.metric("Demanda Promedio", f"{predictions.mean():,.0f} MW")
                     st.metric("Pico Máximo", f"{predictions.max():,.0f} MW")
                     st.metric("Valle Mínimo", f"{predictions.min():,.0f} MW")
                     st.metric("Rango", f"{predictions.max() - predictions.min():,.0f} MW")
                 else:
                     st.markdown("No hay estadísticas para mostrar.")
-
-                st.subheader("Rendimiento Histórico del Modelo")
+            
+            with col_stat2:
+                st.markdown("**Rendimiento Histórico del Modelo**")
                 st.info(
                     """
-                    Estas métricas reflejan la precisión del modelo en la **última semana de datos históricos**
-                    que no fueron utilizados para el entrenamiento (conjunto de prueba).
+                    Precisión del modelo en la **última semana de datos históricos**
+                    que no fueron utilizados para el entrenamiento.
                     """
                 )
                 st.metric("RMSE (Raíz del Error Cuadrático Medio)", f"94.54 MW")
                 st.metric("MAPE (Error Porcentual Absoluto Medio)", f"1.54%")
                 st.metric("Precisión (100 - MAPE)", f"98.46%")
-
-
+            
+            # -----------------------------------------------------------
+            
             st.subheader("Datos del Pronóstico")
             predictions_df = predictions.to_frame('Demanda (MW)') # Use predictions (sliced) for the table
             predictions_df.index.name = 'Fecha-Hora'
