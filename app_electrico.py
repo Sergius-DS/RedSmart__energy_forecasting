@@ -6,6 +6,8 @@ import holidays
 from xgboost import XGBRegressor
 from skforecast.recursive import ForecasterRecursive
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+import sys # Para la versión de Python
+import platform # Para la información del sistema operativo
 
 # --- Configuration and Setup ---
 st.set_page_config(
@@ -50,7 +52,7 @@ REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
 def create_exogenous_features(data):
     """
-    Creates the 'ciclo', day dummies, and 'feriado' features, 
+    Creates the 'ciclo', day dummies, and 'feriado' features,
     y aplica la ordenación requerida (alfabética).
     """
     data_with_features = data.copy()
@@ -64,7 +66,7 @@ def create_exogenous_features(data):
     data_with_features['dia'] = data_with_features.index.day_name().map(DAYS_TRANSLATION)
     # Ensure all possible day values are known to pandas for consistent dummy creation
     data_with_features['dia'] = pd.Categorical(
-        data_with_features['dia'], 
+        data_with_features['dia'],
         categories=all_translated_days
     )
     data_with_features = pd.get_dummies(data_with_features, columns=['dia'], dtype=int)
@@ -80,14 +82,14 @@ def create_exogenous_features(data):
         exog = data_with_features.drop(columns=['Demand'])
     else:
         exog = data_with_features
-        
+
     # --- CRITICAL FIX IMPLEMENTATION: Column ordering enforcement ---
-    
+
     # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
     for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
             exog[col] = 0
-            
+
     # 2. Enforce the required column order (Alphabetical)
     exog = exog[REQUIRED_EXOG_COLS]
 
@@ -122,7 +124,7 @@ def train_forecaster(y_train, x_train):
     regressor = XGBRegressor(
         n_estimators=250,
         max_depth=8,
-        learning_rate=0.05, # Corrected learning_rate
+        learning_rate=0.05,
         random_state=123,
         n_jobs=-1
     )
@@ -133,13 +135,29 @@ def train_forecaster(y_train, x_train):
     )
 
     forecaster.fit(y=y_train, exog=x_train)
-    
+
     # Store the columns and their dtypes used during fit in session_state for later comparison
     st.session_state['fit_exog_cols'] = x_train.columns.tolist()
     st.session_state['fit_exog_dtypes'] = x_train.dtypes.to_dict() # Store dtypes as well
+
+    # Added for more detailed version info
+    # Attempt to get skforecast version reliably, falls back to direct import __version__
+    try:
+        import skforecast
+        st.session_state['skforecast_version'] = skforecast.__version__
+    except AttributeError:
+        # Fallback for older versions if __version__ is not directly available or for pypi lookup issues
+        st.session_state['skforecast_version'] = "N/A (check pip list)"
+
+
+    st.session_state['pandas_version'] = pd.__version__
+    st.session_state['python_version'] = sys.version
+    st.session_state['platform_system'] = platform.system()
+
     st.sidebar.write(f"DEBUG (Fit): Columnas exógenas usadas para entrenar: {st.session_state['fit_exog_cols']}")
     st.sidebar.write(f"DEBUG (Fit): dtypes de las columnas de entrenamiento: {st.session_state['fit_exog_dtypes']}")
-    
+    st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state['skforecast_version']}, pandas: {st.session_state['pandas_version']}, Python: {st.session_state['python_version']}, OS: {st.session_state['platform_system']}")
+
     return forecaster
 
 # --- Prediction and Metrics ---
@@ -247,6 +265,8 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
         st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción: {predict_cols_list}")
         st.sidebar.write(f"DEBUG (Predict): dtypes de las columnas de predicción: {predict_dtypes_dict}")
+        st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state.get('skforecast_version')}, pandas: {st.session_state.get('pandas_version')}, Python: {st.session_state.get('python_version')}, OS: {st.session_state.get('platform_system')}")
+
 
         # Se espera que ahora la lista sea idéntica
         if fit_cols_list != predict_cols_list:
@@ -263,6 +283,22 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.stop()
         else:
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idênticos.")
+
+        # 🔴 SOLUCIÓN ROBUSTA: Reindexar exog_pred para asegurar la consistencia del índice de columnas
+        # Esto fuerza que exog_pred tenga exactamente el mismo Index de columnas que se usó para entrenar,
+        # incluso si hay alguna sutil diferencia interna en los objetos Index de pandas.
+        st.sidebar.write("DEBUG: Aplicando reindexación forzada de columnas para exog_pred.")
+        try:
+            exog_pred = exog_pred.reindex(columns=fit_cols_list)
+            # Re-verify dtypes after reindex and enforce them, as reindex can sometimes alter them if a column was missing and filled with NaN
+            # However, our create_exogenous_features ensures all columns exist and are of int/float.
+            for col, dtype in fit_dtypes_dict.items():
+                if col in exog_pred.columns:
+                    exog_pred[col] = exog_pred[col].astype(dtype)
+            st.sidebar.write("DEBUG: Reindexación y ajuste de dtypes aplicados con éxito.")
+        except Exception as e:
+            st.error(f"❌ ERRO: Falló la reindexación de columnas para la predicción: {e}")
+            st.stop()
 
         # 2. Make Prediction (Ahora debe funcionar con la orden correcta)
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
@@ -306,7 +342,7 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         st.markdown(
             """
             ⚠️ **Nota sobre Métricas:** El modelo se entrenó con todos los datos históricos disponibles.
-            Las métricas de error del script original (`RMSE: 94.54 MW`, `MAPE: 1.54%` para la última semana del dataset) 
+            Las métricas de error del script original (`RMSE: 94.54 MW`, `MAPE: 1.54%` para la última semana del dataset)
             indican la precisión histórica del modelo sobre datos de prueba.
             """
         )
@@ -333,18 +369,34 @@ st.header("Análisis de Rendimiento Histórico")
 # Re-run backtesting metrics from your script for display
 steps_test = 48 * 7
 y_test = y[-steps_test:]
-x_test = exog[-steps_test:]
+x_test = exog[-steps_test:] # Use the full 'exog' with correct column order for testing
 y_train = y[:-steps_test]
 x_train = exog[:-steps_test]
 
 @st.cache_resource(show_spinner="Calculando rendimiento histórico...")
 def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
-    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1) # Corrected learning_rate
+    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
     forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
     forecaster_hist.fit(y=y_t, exog=x_t)
     # Store history fit columns and dtypes for debugging purposes as well
-    st.session_state['hist_fit_exog_cols'] = x_t.columns.tolist()  
+    st.session_state['hist_fit_exog_cols'] = x_t.columns.tolist()
     st.session_state['hist_fit_exog_dtypes'] = x_t.dtypes.to_dict()
+
+    # Apply reindex to x_test_data before prediction in historical context too
+    hist_fit_cols_list = st.session_state['hist_fit_exog_cols']
+    hist_fit_dtypes_dict = st.session_state['hist_fit_exog_dtypes']
+
+    st.sidebar.write("DEBUG (Hist): Aplicando reindexación forzada de columnas para x_test_data.")
+    try:
+        x_test_data = x_test_data.reindex(columns=hist_fit_cols_list)
+        for col, dtype in hist_fit_dtypes_dict.items():
+            if col in x_test_data.columns:
+                x_test_data[col] = x_test_data[col].astype(dtype)
+        st.sidebar.write("DEBUG (Hist): Reindexación y ajuste de dtypes aplicados con éxito para x_test_data.")
+    except Exception as e:
+        st.error(f"❌ ERRO (Histórico): Falló la reindexación de columnas para x_test_data: {e}")
+        st.stop()
+
     return forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
 
 predictions_hist = get_historical_predictions(y_train, x_train, y_test, x_test)
@@ -352,7 +404,7 @@ predictions_hist = get_historical_predictions(y_train, x_train, y_test, x_test)
 # Debugging for historical prediction columns and dtypes as well
 st.sidebar.write(f"DEBUG (Hist Fit): Columnas exógenas usadas para entrenar histórico: {st.session_state.get('hist_fit_exog_cols', [])}")
 st.sidebar.write(f"DEBUG (Hist Fit): dtypes de las columnas de entrenamiento histórico: {st.session_state.get('hist_fit_exog_dtypes', {})}")
-st.sidebar.write(f"DEBUG (Hist Predict): Columnas exógenas para la predicción histórica: {x_test.columns.tolist()}")
+st.sidebar.write(f"DEBUG (Hist Predict): Columnas exógenas para la predicción histórica: {x_test.columns.tolist()}") # This will reflect original x_test before reindex
 st.sidebar.write(f"DEBUG (Hist Predict): dtypes de las columnas de predicción histórica: {x_test.dtypes.to_dict()}")
 
 
