@@ -186,7 +186,7 @@ def train_forecaster(y_train, x_train):
         import holidays as h_lib # avoid name collision
         st.session_state['holidays_version'] = h_lib.__version__
     except AttributeError:
-        st.session_state['holidays_version'] = "N/A (check pip list)")
+        st.session_state['holidays_version'] = "N/A (check pip list)"
 
     st.session_state['pandas_version'] = pd.__version__
     st.session_state['python_version'] = sys.version
@@ -640,6 +640,7 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
