@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import holidays
 from xgboost import XGBRegressor
 from skforecast.recursive import ForecasterRecursive
-# Import these for calculate_metrics
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 
@@ -322,26 +321,45 @@ if y is not None:
                 
                 fig, ax = plt.subplots(figsize=(12, 6))
                 
-                # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción
+                # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción dividida
                 if not y.empty and not predictions_full.empty:
                     context_days = 7  # Show last 7 days of historical data
                     context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
                     
                     y_context = y.loc[context_start:y.index[-1]]
                     
-                    if not y_context.empty:
+                    if not y_context.empty: # Plot only if there's actual context data
                         y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7, linewidth=1.5)
                     
-                    predictions_full.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW)', linewidth=2)
+                    # Define the gap prediction (from historical end to user's display start)
+                    # This is the part skforecast predicted to bridge the gap
+                    predictions_gap = predictions_full.loc[
+                        skforecast_predict_start_datetime : user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
+                    ]
                     
+                    # Plot the gap prediction in blue
+                    if not predictions_gap.empty:
+                        predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico y inicio seleccionado)', linewidth=2)
+                    
+                    # Plot the actual user-requested forecast in red
+                    if not predictions.empty:
+                        predictions.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)', linewidth=2)
+                    
+                    # Add vertical line to show where historical data ends
                     ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
                     
-                    ax.set_xlim(context_start, predictions_full.index[-1])
+                    # Set appropriate x-axis limits to focus on the relevant period
+                    # Start from context_start or the beginning of predictions_gap if it exists
+                    plot_start_limit = context_start
+                    if not predictions_gap.empty:
+                         plot_start_limit = min(context_start, predictions_gap.index.min()) # Ensure we don't cut off gap if it starts earlier
                     
-                    ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{context_start.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                    ax.set_xlim(plot_start_limit, predictions_full.index[-1])
+                    
+                    ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{plot_start_limit.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
 
                 elif not y.empty: # Only historical data available (no predictions)
-                    context_days = 30
+                    context_days = 30 # Show a larger context if no predictions are made
                     context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
                     y_context = y.loc[context_start:y.index[-1]]
                     
@@ -363,7 +381,7 @@ if y is not None:
             
             with col2:
                 st.subheader("Estadísticas del Pronóstico")
-                if not predictions.empty:
+                if not predictions.empty: # Use predictions (sliced) for stats relevant to user's selected horizon
                     st.metric("Demanda Promedio", f"{predictions.mean():,.0f} MW")
                     st.metric("Pico Máximo", f"{predictions.max():,.0f} MW")
                     st.metric("Valle Mínimo", f"{predictions.min():,.0f} MW")
