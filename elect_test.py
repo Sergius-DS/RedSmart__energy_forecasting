@@ -182,7 +182,7 @@ def generate_prediction_exog(start_date_for_exog, steps_for_exog):
 
 
 # --- Main Prediction Function ---
-def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps, y_historical_data):
+def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps):
     
     # Calculate the end of the user's requested display horizon
     end_of_user_display_horizon = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
@@ -281,8 +281,7 @@ if y is not None:
                 forecaster, 
                 skforecast_predict_start_datetime, 
                 user_display_start_datetime, 
-                user_horizon_steps,
-                y # Pass historical data to predict_future
+                user_horizon_steps
             )
             
             # Display results
@@ -293,24 +292,43 @@ if y is not None:
                 
                 fig, ax = plt.subplots(figsize=(12, 6))
                 
-                # 🔴 GRÁFICO MEJORADO: Combinar histórico y predicción completa
-                # Asegurarse de que y y predictions_full no estén vacías antes de intentar combinar
+                # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción
                 if not y.empty and not predictions_full.empty:
-                    # Trazar el histórico (y)
-                    y.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                    # Calculate a reasonable window: show last 7 days of history + the full forecast
+                    context_days = 7  # Show last 7 days of historical data
+                    # Ensure context_start is not before the actual start of y
+                    context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
                     
-                    # Trazar la predicción COMPLETA (predictions_full), que cubre el gap si lo hay
+                    # Get historical context (last 7 days)
+                    y_context = y.loc[context_start:y.index[-1]]
+                    
+                    # Plot historical context
+                    if not y_context.empty: # Plot only if there's actual context data
+                        y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7, linewidth=1.5)
+                    
+                    # Plot the full prediction
                     predictions_full.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW)', linewidth=2)
                     
-                    # Añadir una línea vertical para mostrar dónde terminan los datos históricos y comienza el pronóstico
-                    ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos')
+                    # Add vertical line to show where historical data ends and forecast begins
+                    ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
+                    
+                    # Set appropriate x-axis limits to focus on the relevant period
+                    ax.set_xlim(context_start, predictions_full.index[-1])
+                    
+                    ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{context_start.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
 
-                    ax.set_title(f'Demanda Eléctrica Histórica y Pronóstico\n{y.index.min().strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
-                elif not y.empty: # Only historical data available
-                    y.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
-                    ax.set_title(f'Demanda Eléctrica Histórica\n{y.index.min().strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
-                    st.warning("No se generaron predicciones completas para el período.")
-                else:
+                elif not y.empty: # Only historical data available (no predictions)
+                    context_days = 30 # Show a larger context if no predictions are made
+                    context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
+                    y_context = y.loc[context_start:y.index[-1]]
+                    
+                    if not y_context.empty:
+                        y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                        ax.set_title(f'Demanda Eléctrica Histórica (Últimos {context_days} días)\n{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                    else:
+                        st.warning("No hay datos históricos para mostrar.")
+                        ax.set_title('No hay datos para mostrar')
+                else: # No historical data
                     st.warning("No hay datos históricos ni predicciones para mostrar.")
                     ax.set_title('No hay datos para mostrar')
 
