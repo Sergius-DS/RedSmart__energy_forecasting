@@ -43,7 +43,7 @@ all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 # Lista de todas as possíveis características exógenas
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
-# 🔴 SOLUÇÃO DEFINITIVA: Forçar a ordenação alfabética, que corresponde à ordem do modelo.
+# 🔴 SOLUCIÓN DEFINITIVA: Forzar la ordenación alfabética, que corresponde à ordem do modelo.
 # ['ciclo', 'dia_0Domingo', 'dia_1Lunes', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
@@ -280,7 +280,7 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         # Ensure consistency before prediction
         if not fit_cols_list and not predict_cols_list:
             st.sidebar.write("✅ DEBUG: Ambos entrenamientos y predicciones son sin variables exógenas.")
-            # No reindexing needed if both are empty
+            # No reindexing or reconstruction needed if both are empty
         elif fit_cols_list != predict_cols_list:
             st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
             st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
@@ -295,16 +295,35 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.stop()
         else:
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
-            # 🔴 SOLUCIÓN ROBUSTA: Reindexar exog_pred para asegurar la consistencia del índice de columnas
-            st.sidebar.write("DEBUG: Aplicando reindexación forzada de columnas para exog_pred.")
+
+            # 🔴 SOLUCIÓN MÁS ROBUSTA: Reconstruir exog_pred para asegurar la consistencia total del índice y dtypes de columnas
+            # Esto es más agresivo que solo reindexar y debería eliminar cualquier diferencia sutil
+            st.sidebar.write("DEBUG: Reconstruyendo exog_pred para asegurar total consistencia.")
             try:
-                exog_pred = exog_pred.reindex(columns=fit_cols_list)
-                for col, dtype in fit_dtypes_dict.items():
+                # Create a new DataFrame with the target index and columns, filled with zeros
+                # Then populate it with values from the original exog_pred
+                # This ensures the new DataFrame has a fresh pandas.Index identical to fit_cols_list
+                reconstructed_exog_pred = pd.DataFrame(
+                    0, # Default value, will be overwritten
+                    index=exog_pred.index,
+                    columns=fit_cols_list,
+                )
+
+                # Populate with actual values from the generated exog_pred
+                for col in fit_cols_list:
                     if col in exog_pred.columns:
-                        exog_pred[col] = exog_pred[col].astype(dtype)
-                st.sidebar.write("DEBUG: Reindexación y ajuste de dtypes aplicados con éxito.")
+                        reconstructed_exog_pred[col] = exog_pred[col]
+                
+                # Enforce dtypes
+                for col, dtype in fit_dtypes_dict.items():
+                    if col in reconstructed_exog_pred.columns:
+                        reconstructed_exog_pred[col] = reconstructed_exog_pred[col].astype(dtype)
+                
+                exog_pred = reconstructed_exog_pred # Replace the original exog_pred
+                st.sidebar.write("DEBUG: Reconstrucción y ajuste de dtypes de exog_pred aplicados con éxito.")
+
             except Exception as e:
-                st.error(f"❌ ERRO: Falló la reindexación de columnas para la predicción: {e}")
+                st.error(f"❌ ERRO: Falló la reconstrucción de columnas para la predicción: {e}")
                 st.stop()
 
         # 2. Make Prediction (Ahora debe funcionar con la orden correcta)
@@ -432,26 +451,36 @@ else:
             st.sidebar.write("DEBUG (Hist Fit): x_train (histórico) está vacío. El forecaster fue entrenado SIN variables exógenas.")
 
 
-        # Apply reindex to x_test_data before prediction in historical context too
+        # Apply reconstruction to x_test_data before prediction in historical context too
         hist_fit_cols_list = st.session_state['hist_fit_exog_cols']
         hist_fit_dtypes_dict = st.session_state['hist_fit_exog_dtypes']
 
-        st.sidebar.write("DEBUG (Hist): Aplicando reindexación forzada de columnas para x_test_data.")
+        st.sidebar.write("DEBUG (Hist): Aplicando reconstrucción forzada de columnas para x_test_data.")
         try:
-            # Conditionally reindex and adjust dtypes if the historical model was trained with exog
+            # Conditionally reconstruct and adjust dtypes if the historical model was trained with exog
             if hist_fit_cols_list: # Only apply if columns were present during fit
-                x_test_data = x_test_data.reindex(columns=hist_fit_cols_list)
-                for col, dtype in hist_fit_dtypes_dict.items():
+                reconstructed_x_test_data = pd.DataFrame(
+                    0, # Default value
+                    index=x_test_data.index,
+                    columns=hist_fit_cols_list,
+                )
+                for col in hist_fit_cols_list:
                     if col in x_test_data.columns:
-                        x_test_data[col] = x_test_data[col].astype(dtype)
-                st.sidebar.write("DEBUG (Hist): Reindexación y ajuste de dtypes aplicados con éxito para x_test_data.")
+                        reconstructed_x_test_data[col] = x_test_data[col]
+                
+                for col, dtype in hist_fit_dtypes_dict.items():
+                    if col in reconstructed_x_test_data.columns:
+                        reconstructed_x_test_data[col] = reconstructed_x_test_data[col].astype(dtype)
+                
+                x_test_data = reconstructed_x_test_data # Replace the original x_test_data
+                st.sidebar.write("DEBUG (Hist): Reconstrucción y ajuste de dtypes aplicados con éxito para x_test_data.")
             else:
                 # If historical model was trained without exog, ensure x_test_data for predict is also empty or not passed
                 x_test_data = pd.DataFrame(index=x_test_data.index) # Create an empty DataFrame with the correct index
                 st.sidebar.write("DEBUG (Hist): El modelo histórico fue entrenado sin exógenas. x_test_data para predicción se ha vaciado.")
 
         except Exception as e:
-            st.error(f"❌ ERRO (Histórico): Falló la reindexación de columnas para x_test_data: {e}")
+            st.error(f"❌ ERRO (Histórico): Falló la reconstrucción de columnas para x_test_data: {e}")
             st.stop()
 
         # Debugging for historical prediction columns and dtypes as well
@@ -491,7 +520,6 @@ else:
         else:
             st.warning("No hay datos reales para mostrar en la gráfica histórica.")
 
-        # Corrected line: Use ax=ax_hist
         predictions_hist.plot(ax=ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
         
         ax_hist.set_title('Rendimiento del Modelo en el Conjunto de Prueba')
@@ -502,6 +530,7 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
