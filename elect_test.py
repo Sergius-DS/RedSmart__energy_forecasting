@@ -182,7 +182,7 @@ def generate_prediction_exog(start_date_for_exog, steps_for_exog):
 
 
 # --- Main Prediction Function ---
-def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps):
+def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps, y_historical_data):
     
     # Calculate the end of the user's requested display horizon
     end_of_user_display_horizon = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
@@ -192,14 +192,11 @@ def predict_future(forecaster, skforecast_predict_start_datetime, user_display_s
     total_steps_for_skforecast_predict = int(total_seconds_to_predict / (TIME_STEP_MINUTES * 60)) + 1
     
     if total_steps_for_skforecast_predict < 1:
-        # This handles cases where user_display_start_datetime is very close to skforecast_predict_start_datetime
-        # and user_horizon_steps is small, resulting in 0 or negative steps.
-        # Ensure at least 1 step if the period is valid.
         if skforecast_predict_start_datetime <= end_of_user_display_horizon:
             total_steps_for_skforecast_predict = 1
-        else: # If user_display_start_datetime is actually before skforecast_predict_start_datetime
+        else:
             st.error("Error: La fecha de inicio de visualización es anterior a la fecha de inicio de predicción interna del modelo.")
-            return pd.Series(dtype=float) # Return empty series to avoid further errors
+            return pd.Series(dtype=float), pd.Series(dtype=float) # Return empty series for both
 
 
     # Generate Exogenous Variables for the FULL period required by skforecast
@@ -233,9 +230,9 @@ def predict_future(forecaster, skforecast_predict_start_datetime, user_display_s
         predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict)
 
     # Slice the full prediction for display purposes, starting from user_display_start_datetime
-    predictions = predictions_full.loc[user_display_start_datetime:].copy()
+    predictions_for_display = predictions_full.loc[user_display_start_datetime:].copy()
     
-    return predictions
+    return predictions_full, predictions_for_display
 
 # --- Main App Execution ---
 # Load data and train model
@@ -280,11 +277,12 @@ if y is not None:
     # Prediction button
     if st.sidebar.button("Generar Pronóstico", type="primary"):
         with st.spinner("Calculando pronóstico..."):
-            predictions = predict_future(
+            predictions_full, predictions = predict_future( # predictions_full is new
                 forecaster, 
                 skforecast_predict_start_datetime, 
                 user_display_start_datetime, 
-                user_horizon_steps
+                user_horizon_steps,
+                y # Pass historical data to predict_future
             )
             
             # Display results
@@ -295,21 +293,26 @@ if y is not None:
                 
                 fig, ax = plt.subplots(figsize=(12, 6))
                 
-                # Plot historical data up to the start of the user's requested forecast period
-                context_end_for_plot = user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
-                context_start_for_plot = max(y.index.min(), context_end_for_plot - pd.Timedelta(days=30))
-                
-                y_context_for_plot = y.loc[context_start_for_plot : context_end_for_plot]
+                # 🔴 GRÁFICO MEJORADO: Combinar histórico y predicción completa
+                # Asegurarse de que y y predictions_full no estén vacías antes de intentar combinar
+                if not y.empty and not predictions_full.empty:
+                    # Trazar el histórico (y)
+                    y.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                    
+                    # Trazar la predicción COMPLETA (predictions_full), que cubre el gap si lo hay
+                    predictions_full.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW)', linewidth=2)
+                    
+                    # Añadir una línea vertical para mostrar dónde terminan los datos históricos y comienza el pronóstico
+                    ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos')
 
-                if not y_context_for_plot.empty:
-                    y_context_for_plot.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
-                
-                if not predictions.empty:
-                    predictions.plot(ax=ax, label=f'Pronóstico {horizon} (MW)', color='red', linewidth=2)
-                    ax.set_title(f'Pronóstico de Demanda Eléctrica\n{user_display_start_datetime.strftime("%d/%m/%Y %H:%M")} - {predictions.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                    ax.set_title(f'Demanda Eléctrica Histórica y Pronóstico\n{y.index.min().strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                elif not y.empty: # Only historical data available
+                    y.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+                    ax.set_title(f'Demanda Eléctrica Histórica\n{y.index.min().strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                    st.warning("No se generaron predicciones completas para el período.")
                 else:
-                    st.warning("No se generaron predicciones para el período solicitado.")
-                    ax.set_title(f'Pronóstico de Demanda Eléctrica: No se generaron predicciones')
+                    st.warning("No hay datos históricos ni predicciones para mostrar.")
+                    ax.set_title('No hay datos para mostrar')
 
                 ax.set_xlabel('Fecha y Hora')
                 ax.set_ylabel('Demanda (MW)')
@@ -319,7 +322,7 @@ if y is not None:
             
             with col2:
                 st.subheader("Estadísticas del Pronóstico")
-                if not predictions.empty:
+                if not predictions.empty: # Use predictions (sliced) for stats relevant to user's selected horizon
                     st.metric("Demanda Promedio", f"{predictions.mean():,.0f} MW")
                     st.metric("Pico Máximo", f"{predictions.max():,.0f} MW")
                     st.metric("Valle Mínimo", f"{predictions.min():,.0f} MW")
@@ -328,7 +331,7 @@ if y is not None:
                     st.markdown("No hay estadísticas para mostrar.")
 
             st.subheader("Datos del Pronóstico")
-            predictions_df = predictions.to_frame('Demanda (MW)')
+            predictions_df = predictions.to_frame('Demanda (MW)') # Use predictions (sliced) for the table
             predictions_df.index.name = 'Fecha-Hora'
             
             display_df = predictions_df.copy()
