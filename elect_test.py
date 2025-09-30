@@ -151,7 +151,37 @@ def train_model(y_train, x_train):
         
     return forecaster
 
-# --- Prediction ---
+# --- Prediction Utilities ---
+
+# Re-introducing generate_prediction_exog as a separate function
+def generate_prediction_exog(start_date_for_exog, steps_for_exog):
+    """Generates a future date range and the required exogenous variables."""
+    future_index = pd.date_range(
+        start=start_date_for_exog,
+        periods=steps_for_exog,
+        freq=f"{TIME_STEP_MINUTES}min"
+    )
+
+    future_index = future_index.drop_duplicates()
+    future_data = pd.DataFrame(index=future_index)
+    exog_pred = create_exogenous_features(future_data)
+    
+    # Safety check on generated exog
+    if exog_pred.isnull().any().any():
+        st.error("Error Interno: `exog_pred` contiene valores nulos después de la generación de características.")
+        st.write(exog_pred.isnull().sum())
+        st.stop()
+    if not exog_pred.index.is_monotonic_increasing:
+        st.error("Error Interno: El índice de `exog_pred` no está ordenado monótonamente creciente.")
+        st.stop()
+    if exog_pred.index.duplicated().any():
+        st.error("Error Interno: El índice de `exog_pred` contiene duplicados.")
+        st.stop()
+        
+    return exog_pred
+
+
+# --- Main Prediction Function ---
 def predict_future(forecaster, skforecast_predict_start_datetime, user_display_start_datetime, user_horizon_steps):
     
     # Calculate the end of the user's requested display horizon
@@ -159,27 +189,28 @@ def predict_future(forecaster, skforecast_predict_start_datetime, user_display_s
 
     # Calculate total steps needed for skforecast, starting from skforecast_predict_start_datetime
     total_seconds_to_predict = (end_of_user_display_horizon - skforecast_predict_start_datetime).total_seconds()
-    # Add 1 to steps for inclusivity
     total_steps_for_skforecast_predict = int(total_seconds_to_predict / (TIME_STEP_MINUTES * 60)) + 1
     
-    # Ensure at least 1 step if start and end are the same
-    if total_steps_for_skforecast_predict < 1 and skforecast_predict_start_datetime <= end_of_user_display_horizon:
-        total_steps_for_skforecast_predict = 1
+    if total_steps_for_skforecast_predict < 1:
+        # This handles cases where user_display_start_datetime is very close to skforecast_predict_start_datetime
+        # and user_horizon_steps is small, resulting in 0 or negative steps.
+        # Ensure at least 1 step if the period is valid.
+        if skforecast_predict_start_datetime <= end_of_user_display_horizon:
+            total_steps_for_skforecast_predict = 1
+        else: # If user_display_start_datetime is actually before skforecast_predict_start_datetime
+            st.error("Error: La fecha de inicio de visualización es anterior a la fecha de inicio de predicción interna del modelo.")
+            return pd.Series(dtype=float) # Return empty series to avoid further errors
+
 
     # Generate Exogenous Variables for the FULL period required by skforecast
     exog_pred_full = generate_prediction_exog(skforecast_predict_start_datetime, total_steps_for_skforecast_predict)
 
-    # --- Consistency checks and reconstruction (simplified) ---
+    # --- Consistency checks and reconstruction ---
     fit_cols_list = st.session_state.get('fit_exog_cols', [])
     fit_dtypes_dict = st.session_state.get('fit_exog_dtypes', {})
 
-    if not fit_cols_list and not exog_pred_full.empty:
-        # Model trained without exog, but exog_pred_full is not empty -> should not happen if create_exogenous_features is consistent
-        st.error("Error Interno: El modelo fue entrenado sin exógenas, pero se generaron exógenas inesperadamente para la predicción.")
-        st.stop()
-    elif fit_cols_list and exog_pred_full.empty:
-        # Model trained with exog, but exog_pred_full is empty -> problem in generate_prediction_exog
-        st.error("Error Interno: El modelo fue entrenado con exógenas, pero no se pudieron generar exógenas para la predicción.")
+    if fit_cols_list and exog_pred_full.empty:
+        st.error("Error Interno: El modelo fue entrenado con exógenas, pero la generación de exógenas para la predicción resultó vacía.")
         st.stop()
     elif fit_cols_list: # If model was trained with exogenous variables, ensure consistency
         reconstructed_exog_pred = pd.DataFrame(
@@ -206,7 +237,7 @@ def predict_future(forecaster, skforecast_predict_start_datetime, user_display_s
     
     return predictions
 
-# --- Main App ---
+# --- Main App Execution ---
 # Load data and train model
 y, exog = load_data()
 
@@ -229,7 +260,7 @@ if y is not None:
         "1 mes": STEPS_PER_DAY * 30
     }
     
-    user_horizon_steps = horizon_map[horizon] # Renamed to be clear it's the user's desired horizon
+    user_horizon_steps = horizon_map[horizon]
     
     # Define the actual start of prediction required by skforecast (one step after y ends)
     skforecast_predict_start_datetime = y.index[-1] + pd.Timedelta(minutes=TIME_STEP_MINUTES)
@@ -237,7 +268,8 @@ if y is not None:
     user_selected_date = st.sidebar.date_input(
         "Fecha de inicio (visualización):",
         value=skforecast_predict_start_datetime.date(), # Default to the date of the actual next step
-        min_value=skforecast_predict_start_datetime.date()
+        min_value=skforecast_predict_start_datetime.date(),
+        max_value=y.index[-1].date() + pd.Timedelta(days=365*2) # Max 2 years into the future from last historical data
     )
     
     user_display_start_datetime = pd.to_datetime(user_selected_date).replace(
@@ -265,7 +297,6 @@ if y is not None:
                 
                 # Plot historical data up to the start of the user's requested forecast period
                 context_end_for_plot = user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
-                # Show a reasonable window of historical context, e.g., last 30 days before forecast starts
                 context_start_for_plot = max(y.index.min(), context_end_for_plot - pd.Timedelta(days=30))
                 
                 y_context_for_plot = y.loc[context_start_for_plot : context_end_for_plot]
