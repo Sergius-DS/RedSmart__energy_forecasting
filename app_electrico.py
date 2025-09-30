@@ -186,7 +186,7 @@ def train_forecaster(y_train, x_train):
         import holidays as h_lib # avoid name collision
         st.session_state['holidays_version'] = h_lib.__version__
     except AttributeError:
-        st.session_state['holidays_version'] = "N/A (check pip list)"
+        st.session_state['holidays_version'] = "N/A (check pip list)")
 
     st.session_state['pandas_version'] = pd.__version__
     st.session_state['python_version'] = sys.version
@@ -278,9 +278,9 @@ else: # Mensual
 # The min_value for the date input should allow selecting from the actual start of prediction onwards
 user_selected_date = st.sidebar.date_input(
     "Fecha de Inicio del Pronóstico (Visualización)",
-    value=skforecast_predict_start_datetime, # Default to the actual next step
-    min_value=skforecast_predict_start_datetime,
-    max_value=skforecast_predict_start_datetime + pd.Timedelta(days=365*2)
+    value=skforecast_predict_start_datetime.date(), # Default to the date of the actual next step
+    min_value=skforecast_predict_start_datetime.date(),
+    max_value=skforecast_predict_start_datetime.date() + pd.Timedelta(days=365*2)
 )
 
 # Combine user selected date with the *time component of the skforecast_predict_start_datetime*
@@ -302,22 +302,28 @@ if st.button(f"Generar Pronóstico para {time_label}"):
     with st.spinner(f"Calculando pronóstico de {time_label}..."):
 
         # 🔴 RECALCULATE STEPS FOR SKFORECAST
-        # Calculate the total duration from skforecast's actual start to the end of user's requested horizon
-        end_of_user_horizon_datetime = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
+        # Calculate the end of the user's requested display horizon
+        end_of_user_display_horizon = user_display_start_datetime + pd.Timedelta(minutes=TIME_STEP_MINUTES * (user_horizon_steps - 1))
 
-        # Ensure prediction starts at least from skforecast_predict_start_datetime
-        if end_of_user_horizon_datetime < skforecast_predict_start_datetime:
-            st.error("Error: La fecha de finalización del pronóstico es anterior a la fecha de inicio requerida por el modelo.")
-            st.stop()
-
-        # Calculate total steps needed for skforecast, starting from skforecast_predict_start_datetime
-        # and ending at end_of_user_horizon_datetime
-        time_diff = end_of_user_horizon_datetime - skforecast_predict_start_datetime
-        total_steps_for_skforecast_predict = int(time_diff.total_seconds() / (TIME_STEP_MINUTES * 60)) + 1
-
-        # Adjust total_steps_for_skforecast_predict if user_display_start_datetime is later than skforecast_predict_start_datetime
-        # This will make skforecast predict the "gap" and the user's requested horizon
+        # The end date for skforecast's prediction must be at least the end of the user's display horizon.
+        # It must start from skforecast_predict_start_datetime.
+        # So, the full prediction range for skforecast will be from skforecast_predict_start_datetime
+        # up to end_of_user_display_horizon.
         
+        # Calculate number of steps from skforecast_predict_start_datetime to end_of_user_display_horizon
+        # Ensure we cover the entire period from skforecast's needed start to user's desired end.
+        if skforecast_predict_start_datetime > end_of_user_display_horizon:
+            # This case implies the user chose a display start date very far into the past,
+            # which is prevented by min_value in date_input.
+            # Or user_horizon_steps is very small and the datetime calculation rounds down.
+            # In a healthy scenario, this should not happen.
+            st.error("Error lógico en el cálculo del horizonte de predicción. Revise las fechas.")
+            st.stop()
+            
+        total_seconds_to_predict = (end_of_user_display_horizon - skforecast_predict_start_datetime).total_seconds()
+        total_steps_for_skforecast_predict = int(total_seconds_to_predict / (TIME_STEP_MINUTES * 60)) + 1 # +1 for inclusivity
+
+
         st.sidebar.write(f"DEBUG: skforecast will predict from {skforecast_predict_start_datetime.strftime('%Y-%m-%d %H:%M')}")
         st.sidebar.write(f"DEBUG: Total steps for forecaster.predict(): {total_steps_for_skforecast_predict}")
         st.sidebar.write(f"DEBUG: User selected forecast display start: {user_display_start_datetime.strftime('%Y-%m-%d %H:%M')}")
@@ -325,6 +331,20 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
         # 1. Generate Exogenous Variables for the FULL period required by skforecast
         exog_pred_full = generate_prediction_exog(skforecast_predict_start_datetime, total_steps_for_skforecast_predict)
+
+        # DEBUGGING: Explicitly check the start date of exog_pred_full
+        if not exog_pred_full.empty:
+            st.sidebar.write(f"DEBUG: Actual start date of exog_pred_full: {exog_pred_full.index.min().strftime('%Y-%m-%d %H:%M')}")
+            # Ensure that exog_pred_full actually starts at the expected skforecast_predict_start_datetime
+            if exog_pred_full.index.min() != skforecast_predict_start_datetime:
+                st.error(f"❌ CRITICAL ERROR: `exog_pred_full` does not start at the expected date!")
+                st.error(f"Expected start: {skforecast_predict_start_datetime.strftime('%Y-%m-%d %H:%M')}")
+                st.error(f"Actual start: {exog_pred_full.index.min().strftime('%Y-%m-%d %H:%M')}")
+                st.stop()
+        else:
+            st.warning("DEBUG: exog_pred_full está vacío después de la generación, lo que puede indicar un problema de datos o lógica.")
+            # If exog_pred_full is empty, this is a severe problem
+            st.stop()
 
 
         # --- DEBUGGING LINES (using stored fit_exog_cols and dtypes) ---
@@ -364,15 +384,15 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.sidebar.write("✅ DEBUG: Ambos entrenamientos y predicciones son sin variables exógenas.")
             # No reindexing or reconstruction needed if both are empty
         elif fit_cols_list != predict_cols_list:
-            st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
-            st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
-            st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
+            st.error("❌ ERRO: Foi detectada una discrepancia en las COLUMNAS exógenas ANTES de la previsión!")
+            st.error(f"Colunas usadas durante el TREINAMENTO: {fit_cols_list}")
+            st.error(f"Colunas generadas para la PREVISIÓN: {predict_cols_list}")
             st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique la orden en la función create_exogenous_features.")
             st.stop()
         elif fit_dtypes_dict != predict_dtypes_dict:
-            st.error("❌ ERRO: Foi detectada uma discrepância nos TIPOS DE DADOS (dtypes) das colunas exógenas ANTES da previsão!")
-            st.error(f"Dtypes usados durante o TREINAMENTO: {fit_dtypes_dict}")
-            st.error(f"Dtypes generados para a PREVISÃO: {predict_dtypes_dict}")
+            st.error("❌ ERRO: Foi detectada una discrepancia en los TIPOS DE DATOS (dtypes) de las columnas exógenas ANTES de la previsión!")
+            st.error(f"Dtypes usados durante el TREINAMENTO: {fit_dtypes_dict}")
+            st.error(f"Dtypes generados para la PREVISIÓN: {predict_dtypes_dict}")
             st.warning("Os dtypes deben ser IDÊNTICOS para cada columna.")
             st.stop()
         else:
@@ -620,6 +640,7 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
