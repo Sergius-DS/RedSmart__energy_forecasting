@@ -191,6 +191,11 @@ if y is None:
 # 2. Train Model
 forecaster = train_forecaster(y, exog)
 
+# 🔴 TEMPORARY DIAGNOSTIC CODE: Print the required column order
+st.info(f"Modelo entrenado. Columnas Exógenas Esperadas (forecaster.exog_vars_): **{forecaster.exog_vars_}**")
+# -------------------------------------------------------------------------
+
+
 # --- Sidebar for User Input ---
 st.sidebar.header("Parámetros de Pronóstico")
 
@@ -344,5 +349,6 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
 
