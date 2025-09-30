@@ -191,8 +191,19 @@ if y is None:
 # 2. Train Model
 forecaster = train_forecaster(y, exog)
 
-# 🔴 TEMPORARY DIAGNOSTIC CODE: Print the required column order
-st.info(f"Modelo entrenado. Columnas Exógenas Esperadas (forecaster.exog_vars_): **{forecaster.exog_vars_}**")
+# 🔴 TEMPORARY DIAGNOSTIC CODE: Use the underlying XGBoost model to get the feature order
+try:
+    required_features = forecaster.regressor_.get_booster().feature_names
+except Exception as e:
+    required_features = [
+        "ERROR al acceder a features.",
+        "Intentaremos la siguiente orden: ['ciclo', 'feriado', 'dia_0Domingo',...]"
+    ]
+    st.exception(e) # Log the error but continue
+
+st.info(f"Columnas Exógenas Esperadas por el Modelo: **{required_features}**")
+# -------------------------------------------------------------------------
+
 # -------------------------------------------------------------------------
 
 
@@ -349,6 +360,7 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
 
 
