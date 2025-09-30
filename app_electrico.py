@@ -43,7 +43,7 @@ all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 # Lista de todas as possíveis características exógenas
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
-# 🔴 SOLUÇÃO DEFINITIVA: Forçar a ordenação alfabética, que corresponde à ordem do modelo.
+# 🔴 SOLUCIÓN DEFINITIVA: Forzar la ordenación alfabética, que corresponde à ordem do modelo.
 # ['ciclo', 'dia_0Domingo', 'dia_1Lunes', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
@@ -134,28 +134,33 @@ def train_forecaster(y_train, x_train):
         lags=LAG_STEPS
     )
 
-    forecaster.fit(y=y_train, exog=x_train)
+    # If x_train is empty, skforecast might implicitly assume no exogenous variables.
+    # We explicitly handle this for the main forecaster as well for consistency.
+    if not x_train.empty:
+        forecaster.fit(y=y_train, exog=x_train)
+        st.session_state['fit_exog_cols'] = x_train.columns.tolist()
+        st.session_state['fit_exog_dtypes'] = x_train.dtypes.to_dict()
+        st.sidebar.write(f"DEBUG (Fit): Columnas exógenas usadas para entrenar: {st.session_state['fit_exog_cols']}")
+        st.sidebar.write(f"DEBUG (Fit): dtypes de las columnas de entrenamiento: {st.session_state['fit_exog_dtypes']}")
+    else:
+        # If x_train is empty, fit without exog, and store empty lists/dicts
+        forecaster.fit(y=y_train) # Fit without exogenous variables
+        st.session_state['fit_exog_cols'] = []
+        st.session_state['fit_exog_dtypes'] = {}
+        st.sidebar.write("DEBUG (Fit): x_train está vacío. El forecaster fue entrenado SIN variables exógenas.")
 
-    # Store the columns and their dtypes used during fit in session_state for later comparison
-    st.session_state['fit_exog_cols'] = x_train.columns.tolist()
-    st.session_state['fit_exog_dtypes'] = x_train.dtypes.to_dict() # Store dtypes as well
 
     # Added for more detailed version info
-    # Attempt to get skforecast version reliably, falls back to direct import __version__
     try:
         import skforecast
         st.session_state['skforecast_version'] = skforecast.__version__
     except AttributeError:
-        # Fallback for older versions if __version__ is not directly available or for pypi lookup issues
         st.session_state['skforecast_version'] = "N/A (check pip list)"
-
 
     st.session_state['pandas_version'] = pd.__version__
     st.session_state['python_version'] = sys.version
     st.session_state['platform_system'] = platform.system()
 
-    st.sidebar.write(f"DEBUG (Fit): Columnas exógenas usadas para entrenar: {st.session_state['fit_exog_cols']}")
-    st.sidebar.write(f"DEBUG (Fit): dtypes de las columnas de entrenamiento: {st.session_state['fit_exog_dtypes']}")
     st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state['skforecast_version']}, pandas: {st.session_state['pandas_version']}, Python: {st.session_state['python_version']}, OS: {st.session_state['platform_system']}")
 
     return forecaster
@@ -204,6 +209,10 @@ def calculate_metrics(y_true, y_pred):
 y, exog = load_and_preprocess_data()
 if y is None:
     st.stop()
+
+# Add a debug message about data length
+st.sidebar.write(f"DEBUG: Longitud de datos y: {len(y)}, exog: {len(exog)}")
+
 
 # 2. Train Model
 forecaster = train_forecaster(y, exog)
@@ -268,8 +277,11 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         st.sidebar.write(f"DEBUG (Versions): skforecast: {st.session_state.get('skforecast_version')}, pandas: {st.session_state.get('pandas_version')}, Python: {st.session_state.get('python_version')}, OS: {st.session_state.get('platform_system')}")
 
 
-        # Se espera que ahora la lista sea idéntica
-        if fit_cols_list != predict_cols_list:
+        # Ensure consistency before prediction
+        if not fit_cols_list and not predict_cols_list:
+            st.sidebar.write("✅ DEBUG: Ambos entrenamientos y predicciones son sin variables exógenas.")
+            # No reindexing needed if both are empty
+        elif fit_cols_list != predict_cols_list:
             st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
             st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
             st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
@@ -282,26 +294,26 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.warning("Os dtypes devem ser IDÉNTICOS para cada coluna.")
             st.stop()
         else:
-            st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idênticos.")
-
-        # 🔴 SOLUCIÓN ROBUSTA: Reindexar exog_pred para asegurar la consistencia del índice de columnas
-        # Esto fuerza que exog_pred tenga exactamente el mismo Index de columnas que se usó para entrenar,
-        # incluso si hay alguna sutil diferencia interna en los objetos Index de pandas.
-        st.sidebar.write("DEBUG: Aplicando reindexación forzada de columnas para exog_pred.")
-        try:
-            exog_pred = exog_pred.reindex(columns=fit_cols_list)
-            # Re-verify dtypes after reindex and enforce them, as reindex can sometimes alter them if a column was missing and filled with NaN
-            # However, our create_exogenous_features ensures all columns exist and are of int/float.
-            for col, dtype in fit_dtypes_dict.items():
-                if col in exog_pred.columns:
-                    exog_pred[col] = exog_pred[col].astype(dtype)
-            st.sidebar.write("DEBUG: Reindexación y ajuste de dtypes aplicados con éxito.")
-        except Exception as e:
-            st.error(f"❌ ERRO: Falló la reindexación de columnas para la predicción: {e}")
-            st.stop()
+            st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
+            # 🔴 SOLUCIÓN ROBUSTA: Reindexar exog_pred para asegurar la consistencia del índice de columnas
+            st.sidebar.write("DEBUG: Aplicando reindexación forzada de columnas para exog_pred.")
+            try:
+                exog_pred = exog_pred.reindex(columns=fit_cols_list)
+                for col, dtype in fit_dtypes_dict.items():
+                    if col in exog_pred.columns:
+                        exog_pred[col] = exog_pred[col].astype(dtype)
+                st.sidebar.write("DEBUG: Reindexación y ajuste de dtypes aplicados con éxito.")
+            except Exception as e:
+                st.error(f"❌ ERRO: Falló la reindexación de columnas para la predicción: {e}")
+                st.stop()
 
         # 2. Make Prediction (Ahora debe funcionar con la orden correcta)
-        predictions = forecaster.predict(steps=steps, exog=exog_pred)
+        # Conditionally pass exog based on whether the model was trained with exog
+        if fit_cols_list: # If model was trained with exogenous variables
+            predictions = forecaster.predict(steps=steps, exog=exog_pred)
+        else: # If model was trained WITHOUT exogenous variables
+            predictions = forecaster.predict(steps=steps)
+
 
         # 3. Display Results
         st.header(f"Resultados del Pronóstico: {prediction_mode}")
@@ -315,13 +327,26 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
             # Plot recent historical data for context (e.g., last 30 days)
             context_steps = STEPS_PER_DAY * 30
-            y_context = y[-context_steps:]
-            y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+            # Ensure y_context is not empty
+            if len(y) > context_steps:
+                y_context = y[-context_steps:]
+            else:
+                y_context = y.copy() # Use all available data if less than context_steps
+
+            if not y_context.empty:
+                y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+            else:
+                st.warning("No hay suficientes datos históricos para mostrar el contexto en el gráfico.")
+
 
             # Plot the forecast
-            predictions.plot(ax=ax, label=f'Pronóstico {prediction_mode} (MW)', color='red', linestyle='--')
+            if not predictions.empty:
+                predictions.plot(ax=ax, label=f'Pronóstico {prediction_mode} (MW)', color='red', linestyle='--')
+                ax.set_title(f'Pronóstico de Demanda Eléctrica: {start_datetime.strftime("%Y-%m-%d")} a {predictions.index[-1].strftime("%Y-%m-%d")}')
+            else:
+                st.warning("No se generaron predicciones.")
+                ax.set_title(f'Pronóstico de Demanda Eléctrica: No se generaron predicciones')
 
-            ax.set_title(f'Pronóstico de Demanda Eléctrica: {start_datetime.strftime("%Y-%m-%d")} a {predictions.index[-1].strftime("%Y-%m-%d")}')
             ax.set_xlabel('Fecha y Hora')
             ax.set_ylabel('Demanda (MW)')
             ax.legend()
@@ -331,11 +356,14 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         # --- Metrics ---
         with col2:
             st.subheader("Información Clave")
-            st.markdown(f"**Inicio del Pronóstico:** {predictions.index[0].strftime('%Y-%m-%d %H:%M')}")
-            st.markdown(f"**Fin del Pronóstico:** {predictions.index[-1].strftime('%Y-%m-%d %H:%M')}")
-            st.markdown(f"**Demanda Promedio Pronosticada:** **{predictions.mean():,.2f} MW**")
-            st.markdown(f"**Pico Máximo Pronosticado:** **{predictions.max():,.2f} MW**")
-            st.markdown(f"**Valle Mínimo Pronosticado:** **{predictions.min():,.2f} MW**")
+            if not predictions.empty:
+                st.markdown(f"**Inicio del Pronóstico:** {predictions.index[0].strftime('%Y-%m-%d %H:%M')}")
+                st.markdown(f"**Fin del Pronóstico:** {predictions.index[-1].strftime('%Y-%m-%d %H:%M')}")
+                st.markdown(f"**Demanda Promedio Pronosticada:** **{predictions.mean():,.2f} MW**")
+                st.markdown(f"**Pico Máximo Pronosticado:** **{predictions.max():,.2f} MW**")
+                st.markdown(f"**Valle Mínimo Pronosticado:** **{predictions.min():,.2f} MW**")
+            else:
+                st.markdown("No hay datos de pronóstico para mostrar.")
 
 
         # --- Metric Note (Since we don't have a true test set for *this* prediction) ---
@@ -351,16 +379,19 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         st.subheader("Tabla de Pronóstico")
         predictions_df = predictions.to_frame(name='Demanda Pronosticada (MW)')
         predictions_df.index.name = 'Fecha y Hora'
-        st.dataframe(predictions_df.style.format("{:,.2f}"))
+        if not predictions_df.empty:
+            st.dataframe(predictions_df.style.format("{:,.2f}"))
 
-        # Option to download the forecast
-        csv = predictions_df.to_csv().encode('utf-8')
-        st.download_button(
-            label="Descargar Pronóstico como CSV",
-            data=csv,
-            file_name=f'pronostico_demanda_electrica_{prediction_mode.lower().split(" ")[0]}.csv',
-            mime='text/csv',
-        )
+            # Option to download the forecast
+            csv = predictions_df.to_csv().encode('utf-8')
+            st.download_button(
+                label="Descargar Pronóstico como CSV",
+                data=csv,
+                file_name=f'pronostico_demanda_electrica_{prediction_mode.lower().split(" ")[0]}.csv',
+                mime='text/csv',
+            )
+        else:
+            st.warning("No hay pronósticos para mostrar o descargar.")
 
 # --- Historical Performance Section ---
 
@@ -368,68 +399,104 @@ st.header("Análisis de Rendimiento Histórico")
 
 # Re-run backtesting metrics from your script for display
 steps_test = 48 * 7
-y_test = y[-steps_test:]
-x_test = exog[-steps_test:] # Use the full 'exog' with correct column order for testing
-y_train = y[:-steps_test]
-x_train = exog[:-steps_test]
+# Check if enough data exists for historical performance calculation
+# Need enough data for lags + training set + test set
+# min_data_needed = LAG_STEPS (for first prediction) + steps_test (for test set) + 1 (at least one point for train)
+min_data_needed = LAG_STEPS + steps_test + 1
 
-@st.cache_resource(show_spinner="Calculando rendimiento histórico...")
-def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
-    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
-    forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
-    forecaster_hist.fit(y=y_t, exog=x_t)
-    # Store history fit columns and dtypes for debugging purposes as well
-    st.session_state['hist_fit_exog_cols'] = x_t.columns.tolist()
-    st.session_state['hist_fit_exog_dtypes'] = x_t.dtypes.to_dict()
+if len(y) < min_data_needed:
+    st.warning(f"No hay suficientes datos históricos (mínimo {min_data_needed} puntos) para calcular el rendimiento histórico sobre la última semana ({steps_test} pasos) más los lags requeridos ({LAG_STEPS} pasos).")
+    # You might want to stop here or just display a message
+    # For now, let's just bypass the calculation and display a warning.
+    st.markdown("No se pudo calcular el rendimiento histórico. Asegúrese de que el archivo `DemandaCOES_.xlsx` contenga al menos 7 días de datos para el test set + 2 días para los lags + datos para el train set.")
+else:
+    y_test = y[-steps_test:]
+    x_test = exog[-steps_test:]
+    y_train = y[:-steps_test]
+    x_train = exog[:-steps_test]
 
-    # Apply reindex to x_test_data before prediction in historical context too
-    hist_fit_cols_list = st.session_state['hist_fit_exog_cols']
-    hist_fit_dtypes_dict = st.session_state['hist_fit_exog_dtypes']
+    @st.cache_resource(show_spinner="Calculando rendimiento histórico...")
+    def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
+        regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
+        forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
 
-    st.sidebar.write("DEBUG (Hist): Aplicando reindexación forzada de columnas para x_test_data.")
-    try:
-        x_test_data = x_test_data.reindex(columns=hist_fit_cols_list)
-        for col, dtype in hist_fit_dtypes_dict.items():
-            if col in x_test_data.columns:
-                x_test_data[col] = x_test_data[col].astype(dtype)
-        st.sidebar.write("DEBUG (Hist): Reindexación y ajuste de dtypes aplicados con éxito para x_test_data.")
-    except Exception as e:
-        st.error(f"❌ ERRO (Histórico): Falló la reindexación de columnas para x_test_data: {e}")
-        st.stop()
-
-    return forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
-
-predictions_hist = get_historical_predictions(y_train, x_train, y_test, x_test)
-
-# Debugging for historical prediction columns and dtypes as well
-st.sidebar.write(f"DEBUG (Hist Fit): Columnas exógenas usadas para entrenar histórico: {st.session_state.get('hist_fit_exog_cols', [])}")
-st.sidebar.write(f"DEBUG (Hist Fit): dtypes de las columnas de entrenamiento histórico: {st.session_state.get('hist_fit_exog_dtypes', {})}")
-st.sidebar.write(f"DEBUG (Hist Predict): Columnas exógenas para la predicción histórica: {x_test.columns.tolist()}") # This will reflect original x_test before reindex
-st.sidebar.write(f"DEBUG (Hist Predict): dtypes de las columnas de predicción histórica: {x_test.dtypes.to_dict()}")
+        # Handle empty x_t (x_train for historical)
+        if not x_t.empty:
+            forecaster_hist.fit(y=y_t, exog=x_t)
+            st.session_state['hist_fit_exog_cols'] = x_t.columns.tolist()
+            st.session_state['hist_fit_exog_dtypes'] = x_t.dtypes.to_dict()
+            st.sidebar.write(f"DEBUG (Hist Fit): Columnas exógenas usadas para entrenar histórico: {st.session_state.get('hist_fit_exog_cols', [])}")
+            st.sidebar.write(f"DEBUG (Hist Fit): dtypes de las columnas de entrenamiento histórico: {st.session_state.get('hist_fit_exog_dtypes', {})}")
+        else:
+            forecaster_hist.fit(y=y_t)
+            st.session_state['hist_fit_exog_cols'] = []
+            st.session_state['hist_fit_exog_dtypes'] = {}
+            st.sidebar.write("DEBUG (Hist Fit): x_train (histórico) está vacío. El forecaster fue entrenado SIN variables exógenas.")
 
 
-metrics = calculate_metrics(y_test, predictions_hist)
+        # Apply reindex to x_test_data before prediction in historical context too
+        hist_fit_cols_list = st.session_state['hist_fit_exog_cols']
+        hist_fit_dtypes_dict = st.session_state['hist_fit_exog_dtypes']
 
-# Display historical metrics in a cleaner format
-st.subheader("Métricas de Precisión sobre la Última Semana de Datos (Test Set)")
-cols_metrics = st.columns(3)
-metrics_list = list(metrics.items())
+        st.sidebar.write("DEBUG (Hist): Aplicando reindexación forzada de columnas para x_test_data.")
+        try:
+            # Conditionally reindex and adjust dtypes if the historical model was trained with exog
+            if hist_fit_cols_list: # Only apply if columns were present during fit
+                x_test_data = x_test_data.reindex(columns=hist_fit_cols_list)
+                for col, dtype in hist_fit_dtypes_dict.items():
+                    if col in x_test_data.columns:
+                        x_test_data[col] = x_test_data[col].astype(dtype)
+                st.sidebar.write("DEBUG (Hist): Reindexación y ajuste de dtypes aplicados con éxito para x_test_data.")
+            else:
+                # If historical model was trained without exog, ensure x_test_data for predict is also empty or not passed
+                x_test_data = pd.DataFrame(index=x_test_data.index) # Create an empty DataFrame with the correct index
+                st.sidebar.write("DEBUG (Hist): El modelo histórico fue entrenado sin exógenas. x_test_data para predicción se ha vaciado.")
 
-for i, (name, value) in enumerate(metrics_list):
-    cols_metrics[i % 3].metric(label=name, value=value)
+        except Exception as e:
+            st.error(f"❌ ERRO (Histórico): Falló la reindexación de columnas para x_test_data: {e}")
+            st.stop()
+
+        # Debugging for historical prediction columns and dtypes as well
+        st.sidebar.write(f"DEBUG (Hist Predict): Columnas exógenas para la predicción histórica: {x_test_data.columns.tolist()}")
+        st.sidebar.write(f"DEBUG (Hist Predict): dtypes de las columnas de predicción histórica: {x_test_data.dtypes.to_dict()}")
+
+        # Conditionally pass exog to predict based on whether it was used during fit
+        if hist_fit_cols_list:
+            predictions_hist = forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
+        else:
+            predictions_hist = forecaster_hist.predict(steps=len(y_test_data))
+
+        return predictions_hist
+
+    predictions_hist = get_historical_predictions(y_train, x_train, y_test, x_test)
 
 
-# Display the historical plot
-st.subheader("Gráfica de Ajuste Histórico (Última Semana)")
-fig_hist, ax_hist = plt.subplots(figsize=(14, 6))
-y_test.plot(ax=ax_hist, label='Valor Real (MW)', color='blue')
-predictions_hist.plot(ax=ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
-ax_hist.set_title('Rendimiento del Modelo en el Conjunto de Prueba')
-ax_hist.set_xlabel('Fecha y Hora')
-ax_hist.set_ylabel('Demanda (MW)')
-ax_hist.legend()
-ax_hist.grid(True)
-st.pyplot(fig_hist)
+    if not predictions_hist.empty:
+        metrics = calculate_metrics(y_test, predictions_hist)
+
+        # Display historical metrics in a cleaner format
+        st.subheader("Métricas de Precisión sobre la Última Semana de Datos (Test Set)")
+        cols_metrics = st.columns(3)
+        metrics_list = list(metrics.items())
+
+        for i, (name, value) in enumerate(metrics_list):
+            cols_metrics[i % 3].metric(label=name, value=value)
+
+
+        # Display the historical plot
+        st.subheader("Gráfica de Ajuste Histórico (Última Semana)")
+        fig_hist, ax_hist = plt.subplots(figsize=(14, 6))
+        y_test.plot(ax=ax_hist, label='Valor Real (MW)', color='blue')
+        predictions_hist.plot(ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
+        ax_hist.set_title('Rendimiento del Modelo en el Conjunto de Prueba')
+        ax_hist.set_xlabel('Fecha y Hora')
+        ax_hist.set_ylabel('Demanda (MW)') # Corregido de ax_ylabel a ax_hist.set_ylabel
+        ax_hist.legend()
+        ax_hist.grid(True)
+        st.pyplot(fig_hist)
+    else:
+        st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
