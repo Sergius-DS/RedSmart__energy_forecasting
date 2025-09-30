@@ -122,7 +122,7 @@ def train_forecaster(y_train, x_train):
     regressor = XGBRegressor(
         n_estimators=250,
         max_depth=8,
-        learning_rate=0.05,
+        learning_rate=0.05, # Corrected learning_rate
         random_state=123,
         n_jobs=-1
     )
@@ -134,9 +134,11 @@ def train_forecaster(y_train, x_train):
 
     forecaster.fit(y=y_train, exog=x_train)
     
-    # Store the columns used during fit in session_state for later comparison
+    # Store the columns and their dtypes used during fit in session_state for later comparison
     st.session_state['fit_exog_cols'] = x_train.columns.tolist()
+    st.session_state['fit_exog_dtypes'] = x_train.dtypes.to_dict() # Store dtypes as well
     st.sidebar.write(f"DEBUG (Fit): Columnas exógenas usadas para entrenar: {st.session_state['fit_exog_cols']}")
+    st.sidebar.write(f"DEBUG (Fit): dtypes de las columnas de entrenamiento: {st.session_state['fit_exog_dtypes']}")
     
     return forecaster
 
@@ -237,23 +239,32 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         # 1. Generate Exogenous Variables for the Future Period
         exog_pred = generate_prediction_exog(start_datetime, steps)
 
-        # --- DEBUGGING LINES (using stored fit_exog_cols) ---
+        # --- DEBUGGING LINES (using stored fit_exog_cols and dtypes) ---
         fit_cols_list = st.session_state.get('fit_exog_cols', [])
+        fit_dtypes_dict = st.session_state.get('fit_exog_dtypes', {})
         predict_cols_list = exog_pred.columns.tolist()
+        predict_dtypes_dict = exog_pred.dtypes.to_dict()
 
         st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción: {predict_cols_list}")
+        st.sidebar.write(f"DEBUG (Predict): dtypes de las columnas de predicción: {predict_dtypes_dict}")
 
-        # Se espera que agora a lista seja idêntica
+        # Se espera que ahora la lista sea idéntica
         if fit_cols_list != predict_cols_list:
-            st.error("❌ ERRO: Foi detectada uma discrepância nas colunas exógenas ANTES da previsão!")
+            st.error("❌ ERRO: Foi detectada uma discrepância nas COLUNAS exógenas ANTES da previsão!")
             st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
             st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
-            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Isso não deveria acontecer agora. Verifique a ordem na função create_exogenous_features.")
+            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Verifique a ordem na função create_exogenous_features.")
+            st.stop()
+        elif fit_dtypes_dict != predict_dtypes_dict:
+            st.error("❌ ERRO: Foi detectada uma discrepância nos TIPOS DE DADOS (dtypes) das colunas exógenas ANTES da previsão!")
+            st.error(f"Dtypes usados durante o TREINAMENTO: {fit_dtypes_dict}")
+            st.error(f"Dtypes gerados para a PREVISÃO: {predict_dtypes_dict}")
+            st.warning("Os dtypes devem ser IDÉNTICOS para cada coluna.")
             st.stop()
         else:
-            st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas passou. Nomes e ordem são idênticos.")
+            st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idênticos.")
 
-        # 2. Make Prediction (Agora deve funcionar com a ordem correta)
+        # 2. Make Prediction (Ahora debe funcionar con la orden correcta)
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -328,18 +339,21 @@ x_train = exog[:-steps_test]
 
 @st.cache_resource(show_spinner="Calculando rendimiento histórico...")
 def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
-    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
+    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1) # Corrected learning_rate
     forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
     forecaster_hist.fit(y=y_t, exog=x_t)
-    # Store history fit columns for debugging purposes as well
+    # Store history fit columns and dtypes for debugging purposes as well
     st.session_state['hist_fit_exog_cols'] = x_t.columns.tolist()  
+    st.session_state['hist_fit_exog_dtypes'] = x_t.dtypes.to_dict()
     return forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
 
 predictions_hist = get_historical_predictions(y_train, x_train, y_test, x_test)
 
-# Debugging for historical prediction columns as well
+# Debugging for historical prediction columns and dtypes as well
 st.sidebar.write(f"DEBUG (Hist Fit): Columnas exógenas usadas para entrenar histórico: {st.session_state.get('hist_fit_exog_cols', [])}")
+st.sidebar.write(f"DEBUG (Hist Fit): dtypes de las columnas de entrenamiento histórico: {st.session_state.get('hist_fit_exog_dtypes', {})}")
 st.sidebar.write(f"DEBUG (Hist Predict): Columnas exógenas para la predicción histórica: {x_test.columns.tolist()}")
+st.sidebar.write(f"DEBUG (Hist Predict): dtypes de las columnas de predicción histórica: {x_test.dtypes.to_dict()}")
 
 
 metrics = calculate_metrics(y_test, predictions_hist)
@@ -364,6 +378,7 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
 
 
