@@ -314,9 +314,9 @@ if y is not None:
             )
             
             # Display results
-            col1, col2 = st.columns([2, 1])
+            col_chart, _ = st.columns([1, 0]) # Chart takes full width
             
-            with col1:
+            with col_chart:
                 st.subheader(f"Pronóstico - {horizon}")
                 
                 fig, ax = plt.subplots(figsize=(12, 6))
@@ -349,7 +349,6 @@ if y is not None:
                     ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
                     
                     # Set appropriate x-axis limits to focus on the relevant period
-                    # Start from context_start or the beginning of predictions_gap if it exists
                     plot_start_limit = context_start
                     if not predictions_gap.empty:
                          plot_start_limit = min(context_start, predictions_gap.index.min()) # Ensure we don't cut off gap if it starts earlier
@@ -379,9 +378,14 @@ if y is not None:
                 ax.grid(True, alpha=0.3)
                 st.pyplot(fig)
             
-            with col2:
+            # 🔴 NUEVA SECCIÓN DE ESTADÍSTICAS BAJO EL GRÁFICO
+            st.markdown("---") # Separador visual
+
+            col_stats1, col_stats2 = st.columns(2) # Dos columnas para estadísticas
+
+            with col_stats1:
                 st.subheader("Estadísticas del Pronóstico")
-                if not predictions.empty: # Use predictions (sliced) for stats relevant to user's selected horizon
+                if not predictions.empty:
                     st.metric("Demanda Promedio", f"{predictions.mean():,.0f} MW")
                     st.metric("Pico Máximo", f"{predictions.max():,.0f} MW")
                     st.metric("Valle Mínimo", f"{predictions.min():,.0f} MW")
@@ -389,6 +393,7 @@ if y is not None:
                 else:
                     st.markdown("No hay estadísticas para mostrar.")
 
+            with col_stats2:
                 st.subheader("Rendimiento Histórico del Modelo")
                 st.info(
                     """
