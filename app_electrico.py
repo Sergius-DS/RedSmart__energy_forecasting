@@ -33,22 +33,26 @@ DAYS_TRANSLATION = {
     'Sunday': '0Domingo'
 }
 
-# 🔴 FIX: Define the required columns and their exact order for the forecaster
-# This order must be consistent for both training and prediction.
-# The day dummies are listed in numeric order (0 to 6).
+# --- CRITICAL FIX: Deterministic Column Ordering ---
+# 1. Get the sorted translated day names (e.g., '0Domingo', '1Lunes', ...)
+all_translated_days = sorted(DAYS_TRANSLATION.values())
+# 2. Prepend 'dia_' to get the final dummy column names
+all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
+
+# Define the final, fixed, and sorted order of the exogenous features
+# This order is now fully deterministic and should match the forecaster's internal state.
 REQUIRED_EXOG_COLS = [
     'ciclo',
     'feriado',
-    'dia_0Domingo', 'dia_1Lunes', 'dia_2Martes', 'dia_3Miércoles',
-    'dia_4Jueves', 'dia_5Viernes', 'dia_6Sábado'
-]
+] + all_day_dummy_cols 
+# Ensure the final list has 9 columns: 'ciclo', 'feriado', and 7 'dia_' columns
 
 # --- Feature Engineering Functions ---
 
 def create_exogenous_features(data):
     """
-    Creates the 'ciclo', day dummies, and 'feriado' features.
-    Assumes data index is set to the time series index.
+    Creates the 'ciclo', day dummies, and 'feriado' features, 
+    and enforces the REQUIRED_EXOG_COLS set and order.
     """
     data_with_features = data.copy()
 
@@ -59,31 +63,34 @@ def create_exogenous_features(data):
 
     # 2. Daily Dummies (One-Hot Encoding)
     data_with_features['dia'] = data_with_features.index.day_name().map(DAYS_TRANSLATION)
+    # Ensure all possible day values are known to pandas for consistent dummy creation (optional but safer)
+    data_with_features['dia'] = pd.Categorical(
+        data_with_features['dia'], 
+        categories=all_translated_days
+    )
     data_with_features = pd.get_dummies(data_with_features, columns=['dia'], dtype=int)
 
     # 3. Holiday Feature
-    # Using a broad range of years for the holidays instance
     start_year = data_with_features.index.min().year - 1
     end_year = data_with_features.index.max().year + 2
-    # Ensure holidays are only checked for the normalized date index
     pe = holidays.Peru(years=range(start_year, end_year), observed=True)
     data_with_features['feriado'] = data_with_features.index.normalize().isin(pe).astype(int)
 
-    # Drop the original 'Demand' column to isolate exogenous variables (exog)
+    # Drop the original 'Demand' column
     if 'Demand' in data_with_features.columns:
         exog = data_with_features.drop(columns=['Demand'])
     else:
         exog = data_with_features
         
-    # 🔴 FIX IMPLEMENTATION: Ensure all required columns are present and ordered correctly
+    # --- CRITICAL FIX IMPLEMENTATION ---
     
-    # 1. Ensure all columns in REQUIRED_EXOG_COLS exist in the prediction data
+    # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
     for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
             # If a day dummy (or other feature) is missing, add it and set to 0
             exog[col] = 0
             
-    # 2. Reorder columns to match the training data's expected order
+    # 2. Enforce the required column order
     exog = exog[REQUIRED_EXOG_COLS]
 
     return exog
@@ -104,10 +111,9 @@ def load_and_preprocess_data():
     data.rename(columns={'EJECUTADO': 'Demand'}, inplace=True)
     data = data.asfreq(f"{TIME_STEP_MINUTES}min")
 
-    # Split data: The entire dataset is used for training the final model.
     y = data['Demand'].copy()
     
-    # Create exogenous features for the full training set (the FIX applies here too!)
+    # Create exogenous features for the full training set (uses the fixed ordering)
     exog = create_exogenous_features(data[['Demand']])
 
     return y, exog
@@ -119,39 +125,36 @@ def train_forecaster(y_train, x_train):
     """
     Trains the final XGBoost forecaster with the best-found hyperparameters.
     """
-    # Best parameters from your grid search: lags=96, max_depth=8, n_estimators=250, learning_rate=0.05
     regressor = XGBRegressor(
         n_estimators=250,
         max_depth=8,
         learning_rate=0.05,
         random_state=123,
-        n_jobs=-1 # Use all available cores for training
+        n_jobs=-1
     )
 
     forecaster = ForecasterRecursive(
         regressor=regressor,
-        lags=LAG_STEPS # 96 half-hours (2 days)
+        lags=LAG_STEPS
     )
 
-    # Training uses the fixed and ordered x_train
+    # x_train already has the deterministic column order
     forecaster.fit(y=y_train, exog=x_train)
     return forecaster
 
-# --- Prediction and Metrics ---
+# --- Prediction and Metrics (Rest of the script remains the same) ---
 
 def generate_prediction_exog(start_date, steps):
     """Generates a future date range and the required exogenous variables."""
-    # Create the future date range
     future_index = pd.date_range(
         start=start_date,
         periods=steps,
         freq=f"{TIME_STEP_MINUTES}min"
     )
 
-    # Create an empty DataFrame with the future index
     future_data = pd.DataFrame(index=future_index)
-
-    # Generate exogenous features for the future period (the FIX applies here too!)
+    
+    # This call now guarantees correct column order/set
     exog_pred = create_exogenous_features(future_data)
 
     return exog_pred
@@ -184,7 +187,7 @@ def calculate_metrics(y_true, y_pred):
 # 1. Load Data
 y, exog = load_and_preprocess_data()
 if y is None:
-    st.stop() # Stop if data loading failed
+    st.stop()
 
 # 2. Train Model
 forecaster = train_forecaster(y, exog)
@@ -199,28 +202,26 @@ prediction_mode = st.sidebar.radio(
 )
 
 if prediction_mode == 'Diario (24h)':
-    steps = STEPS_PER_DAY # 48 half-hours
+    steps = STEPS_PER_DAY
     time_label = "1 Día (48 pasos)"
 elif prediction_mode == 'Semanal (7 días)':
-    steps = STEPS_PER_DAY * 7 # 336 half-hours
+    steps = STEPS_PER_DAY * 7
     time_label = "7 Días (336 pasos)"
 else: # Mensual
-    steps = STEPS_PER_DAY * 30 # 1440 half-hours
+    steps = STEPS_PER_DAY * 30
     time_label = "30 Días (1440 pasos)"
 
 # Prediction Start Date Selection
-# The prediction should start right after the last date in the training data
 last_date = y.index[-1]
 default_start_date = last_date + pd.Timedelta(minutes=TIME_STEP_MINUTES)
 
 start_date = st.sidebar.date_input(
     "Fecha y Hora de Inicio del Pronóstico",
     value=default_start_date,
-    min_value=default_start_date, # Cannot forecast backward
-    max_value=default_start_date + pd.Timedelta(days=365*2) # Limit future range for stability
+    min_value=default_start_date,
+    max_value=default_start_date + pd.Timedelta(days=365*2)
 )
 
-# Convert start_date to a full datetime object using the last date's time component
 start_datetime = pd.to_datetime(start_date) + pd.Timedelta(
     hours=default_start_date.hour,
     minutes=default_start_date.minute
@@ -238,11 +239,9 @@ if st.button(f"Generar Pronóstico para {time_label}"):
     with st.spinner(f"Calculando pronóstico de {time_label}..."):
 
         # 1. Generate Exogenous Variables for the Future Period
-        # This call now guarantees correct column order/set
         exog_pred = generate_prediction_exog(start_datetime, steps)
 
         # 2. Make Prediction
-        # This will now successfully align with the forecaster's expected exog columns
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -309,21 +308,17 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 st.header("Análisis de Rendimiento Histórico")
 
 # Re-run backtesting metrics from your script for display
-# This section assumes the test data from your script is the *last week* of the original dataset.
 steps_test = 48 * 7
 y_test = y[-steps_test:]
 x_test = exog[-steps_test:]
 y_train = y[:-steps_test]
 x_train = exog[:-steps_test]
 
-# Retrain the model on the historical training set to get the official 'test' prediction
-# This is necessary because the main model in the app is trained on ALL data.
 @st.cache_resource(show_spinner="Calculando rendimiento histórico...")
 def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
     regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
     forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
     forecaster_hist.fit(y=y_t, exog=x_t)
-    # The x_test data here also benefits from the column ordering fix
     predictions_hist = forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
     return predictions_hist
 
@@ -350,3 +345,4 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
