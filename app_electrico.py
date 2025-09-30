@@ -33,19 +33,20 @@ DAYS_TRANSLATION = {
     'Sunday': '0Domingo'
 }
 
-# --- CRITICAL FIX: Deterministic Column Ordering ---
+# --- CRITICAL FIX: Deterministic Column Ordering (Alphabetical Hypothesis) ---
 # 1. Get the sorted translated day names (e.g., '0Domingo', '1Lunes', ...)
 all_translated_days = sorted(DAYS_TRANSLATION.values())
 # 2. Prepend 'dia_' to get the final dummy column names
 all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 
-# Define the final, fixed, and sorted order of the exogenous features
-# This order is now fully deterministic and should match the forecaster's internal state.
-REQUIRED_EXOG_COLS = [
-    'ciclo',
-    'feriado',
-] + all_day_dummy_cols 
-# Ensure the final list has 9 columns: 'ciclo', 'feriado', and 7 'dia_' columns
+# 🔴 FINAL FIX: Order them alphabetically, which is a common default.
+# The order is: ciclo, followed by all dia_ dummies, followed by feriado.
+REQUIRED_EXOG_COLS = (
+    ['ciclo'] + 
+    all_day_dummy_cols + 
+    ['feriado']
+)
+
 
 # --- Feature Engineering Functions ---
 
@@ -63,7 +64,7 @@ def create_exogenous_features(data):
 
     # 2. Daily Dummies (One-Hot Encoding)
     data_with_features['dia'] = data_with_features.index.day_name().map(DAYS_TRANSLATION)
-    # Ensure all possible day values are known to pandas for consistent dummy creation (optional but safer)
+    # Ensure all possible day values are known to pandas for consistent dummy creation
     data_with_features['dia'] = pd.Categorical(
         data_with_features['dia'], 
         categories=all_translated_days
@@ -87,7 +88,7 @@ def create_exogenous_features(data):
     # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
     for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
-            # If a day dummy (or other feature) is missing, add it and set to 0
+            # If a feature is missing (e.g., a day of week in a short prediction), add it and set to 0
             exog[col] = 0
             
     # 2. Enforce the required column order
@@ -138,7 +139,6 @@ def train_forecaster(y_train, x_train):
         lags=LAG_STEPS
     )
 
-    # x_train already has the deterministic column order
     forecaster.fit(y=y_train, exog=x_train)
     return forecaster
 
@@ -154,7 +154,6 @@ def generate_prediction_exog(start_date, steps):
 
     future_data = pd.DataFrame(index=future_index)
     
-    # This call now guarantees correct column order/set
     exog_pred = create_exogenous_features(future_data)
 
     return exog_pred
@@ -345,4 +344,5 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
