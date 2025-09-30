@@ -33,19 +33,17 @@ DAYS_TRANSLATION = {
     'Sunday': '0Domingo'
 }
 
-# --- CRITICAL FIX: Deterministic Column Ordering (Alphabetical Hypothesis) ---
 # 1. Get the sorted translated day names (e.g., '0Domingo', '1Lunes', ...)
 all_translated_days = sorted(DAYS_TRANSLATION.values())
 # 2. Prepend 'dia_' to get the final dummy column names
 all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 
-# 🔴 FINAL FIX: Order them alphabetically, which is a common default.
-# The order is: ciclo, followed by all dia_ dummies, followed by feriado.
-REQUIRED_EXOG_COLS = (
-    ['ciclo'] + 
-    all_day_dummy_cols + 
-    ['feriado']
-)
+# 🔴 ÚLTIMA CORRECCIÓN: Definición de la orden requerida.
+# Intentamos la orden más lógica: 'ciclo', 'feriado', y luego todos los dummies de día.
+REQUIRED_EXOG_COLS = [
+    'ciclo',
+    'feriado',
+] + all_day_dummy_cols
 
 
 # --- Feature Engineering Functions ---
@@ -53,7 +51,7 @@ REQUIRED_EXOG_COLS = (
 def create_exogenous_features(data):
     """
     Creates the 'ciclo', day dummies, and 'feriado' features, 
-    and enforces the REQUIRED_EXOG_COLS set and order.
+    y aplica la ordenación requerida.
     """
     data_with_features = data.copy()
 
@@ -88,7 +86,6 @@ def create_exogenous_features(data):
     # 1. Ensure all columns in REQUIRED_EXOG_COLS exist
     for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
-            # If a feature is missing (e.g., a day of week in a short prediction), add it and set to 0
             exog[col] = 0
             
     # 2. Enforce the required column order
@@ -113,8 +110,6 @@ def load_and_preprocess_data():
     data = data.asfreq(f"{TIME_STEP_MINUTES}min")
 
     y = data['Demand'].copy()
-    
-    # Create exogenous features for the full training set (uses the fixed ordering)
     exog = create_exogenous_features(data[['Demand']])
 
     return y, exog
@@ -123,9 +118,7 @@ def load_and_preprocess_data():
 
 @st.cache_resource(show_spinner="Entrenando modelo de pronóstico...")
 def train_forecaster(y_train, x_train):
-    """
-    Trains the final XGBoost forecaster with the best-found hyperparameters.
-    """
+    """Trains the final XGBoost forecaster."""
     regressor = XGBRegressor(
         n_estimators=250,
         max_depth=8,
@@ -153,7 +146,6 @@ def generate_prediction_exog(start_date, steps):
     )
 
     future_data = pd.DataFrame(index=future_index)
-    
     exog_pred = create_exogenous_features(future_data)
 
     return exog_pred
@@ -190,22 +182,6 @@ if y is None:
 
 # 2. Train Model
 forecaster = train_forecaster(y, exog)
-
-# 🔴 TEMPORARY DIAGNOSTIC CODE: Use the underlying XGBoost model to get the feature order
-try:
-    required_features = forecaster.regressor_.get_booster().feature_names
-except Exception as e:
-    required_features = [
-        "ERROR al acceder a features.",
-        "Intentaremos la siguiente orden: ['ciclo', 'feriado', 'dia_0Domingo',...]"
-    ]
-    st.exception(e) # Log the error but continue
-
-st.info(f"Columnas Exógenas Esperadas por el Modelo: **{required_features}**")
-# -------------------------------------------------------------------------
-
-# -------------------------------------------------------------------------
-
 
 # --- Sidebar for User Input ---
 st.sidebar.header("Parámetros de Pronóstico")
@@ -256,7 +232,7 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         # 1. Generate Exogenous Variables for the Future Period
         exog_pred = generate_prediction_exog(start_datetime, steps)
 
-        # 2. Make Prediction
+        # 2. Make Prediction (Should now work with the correct column order)
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -360,6 +336,7 @@ ax_hist.set_ylabel('Demanda (MW)')
 ax_hist.legend()
 ax_hist.grid(True)
 st.pyplot(fig_hist)
+
 
 
 
