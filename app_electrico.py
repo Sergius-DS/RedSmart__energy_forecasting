@@ -186,7 +186,7 @@ def train_forecaster(y_train, x_train):
         import holidays as h_lib # avoid name collision
         st.session_state['holidays_version'] = h_lib.__version__
     except AttributeError:
-        st.session_state['holidays_version'] = "N/A (check pip list)"
+        st.session_state['holidays_version'] = "N/A (check pip list)")
 
     st.session_state['pandas_version'] = pd.__version__
     st.session_state['python_version'] = sys.version
@@ -263,7 +263,7 @@ prediction_mode = st.sidebar.radio(
     ('Diario (24h)', 'Semanal (7 días)', 'Mensual (30 días)')
 )
 
-# `steps` here defines the length of the *user's requested horizon*, not total steps for skforecast
+# `user_horizon_steps` here defines the length of the *user's requested horizon*, not total steps for skforecast
 if prediction_mode == 'Diario (24h)':
     user_horizon_steps = STEPS_PER_DAY
     time_label = "1 Día (48 pasos)"
@@ -310,16 +310,14 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.error("Error: La fecha de finalización del pronóstico es anterior a la fecha de inicio requerida por el modelo.")
             st.stop()
 
+        # Calculate total steps needed for skforecast, starting from skforecast_predict_start_datetime
+        # and ending at end_of_user_horizon_datetime
         time_diff = end_of_user_horizon_datetime - skforecast_predict_start_datetime
         total_steps_for_skforecast_predict = int(time_diff.total_seconds() / (TIME_STEP_MINUTES * 60)) + 1
 
-        # Edge case: If the user_display_start_datetime is exactly skforecast_predict_start_datetime,
-        # and user_horizon_steps is 1, total_steps_for_skforecast_predict could be 1.
-        # Ensure it's at least user_horizon_steps if there's no "gap"
-        if total_steps_for_skforecast_predict < user_horizon_steps:
-             total_steps_for_skforecast_predict = user_horizon_steps
-
-
+        # Adjust total_steps_for_skforecast_predict if user_display_start_datetime is later than skforecast_predict_start_datetime
+        # This will make skforecast predict the "gap" and the user's requested horizon
+        
         st.sidebar.write(f"DEBUG: skforecast will predict from {skforecast_predict_start_datetime.strftime('%Y-%m-%d %H:%M')}")
         st.sidebar.write(f"DEBUG: Total steps for forecaster.predict(): {total_steps_for_skforecast_predict}")
         st.sidebar.write(f"DEBUG: User selected forecast display start: {user_display_start_datetime.strftime('%Y-%m-%d %H:%M')}")
@@ -375,12 +373,12 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.error("❌ ERRO: Foi detectada uma discrepância nos TIPOS DE DADOS (dtypes) das colunas exógenas ANTES da previsão!")
             st.error(f"Dtypes usados durante o TREINAMENTO: {fit_dtypes_dict}")
             st.error(f"Dtypes generados para a PREVISÃO: {predict_dtypes_dict}")
-            st.warning("Os dtypes devem ser IDÊNTICOS para cada coluna.")
+            st.warning("Os dtypes deben ser IDÊNTICOS para cada columna.")
             st.stop()
         else:
             st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas e seus dtypes passou. Nomes, ordem e dtypes são idénticos.")
 
-            # 🔴 SOLUCIÓN MÁS ROBUSTA: Reconstruir exog_pred para asegurar la consistencia total del índice y dtypes de columnas
+            # 🔴 SOLUCIÓN MÁS ROBUSTA: Reconstruir exog_pred_full para asegurar la consistencia total del índice y dtypes de columnas
             st.sidebar.write("DEBUG: Reconstruyendo exog_pred_full para asegurar total consistencia.")
             try:
                 reconstructed_exog_pred = pd.DataFrame(
@@ -412,9 +410,8 @@ if st.button(f"Generar Pronóstico para {time_label}"):
         else: # If model was trained WITHOUT exogenous variables
             predictions_full = forecaster.predict(steps=total_steps_for_skforecast_predict)
 
-        # 3. Slice the full prediction and exog_pred_full for display purposes, starting from user_display_start_datetime
+        # 3. Slice the full prediction for display purposes, starting from user_display_start_datetime
         predictions = predictions_full.loc[user_display_start_datetime:].copy()
-        exog_pred_sliced = exog_pred_full.loc[user_display_start_datetime:].copy() # For debugging if needed
 
 
         # 3. Display Results
@@ -427,24 +424,26 @@ if st.button(f"Generar Pronóstico para {time_label}"):
             st.subheader("Gráfica de la Demanda Eléctrica")
             fig, ax = plt.subplots(figsize=(14, 6))
 
-            # Plot recent historical data for context (e.g., last 30 days)
-            context_steps = STEPS_PER_DAY * 30
-            # Ensure y_context is not empty
-            if len(y) > context_steps:
-                y_context = y[-context_steps:]
-            else:
-                y_context = y.copy() # Use all available data if less than context_steps
+            # 🔴 CORRECCIÓN AQUÍ: Plot historical data up to the start of the user's requested forecast period
+            # This ensures no gap between historical context and the forecast plot.
+            context_end_for_plot = user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
+            
+            # Show a reasonable window of historical context, e.g., last 30 days before forecast starts
+            # Ensure it doesn't go before the actual start of y
+            context_start_for_plot = max(y.index.min(), context_end_for_plot - pd.Timedelta(days=30))
+            
+            y_context_for_plot = y.loc[context_start_for_plot : context_end_for_plot]
 
-            if not y_context.empty:
-                y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
+            if not y_context_for_plot.empty:
+                y_context_for_plot.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
             else:
-                st.warning("No hay suficientes datos históricos para mostrar el contexto en el gráfico.")
+                st.warning("No hay suficientes datos históricos para mostrar el contexto en el gráfico principal.")
 
 
             # Plot the forecast
             if not predictions.empty:
                 predictions.plot(ax=ax, label=f'Pronóstico {prediction_mode} (MW)', color='red', linestyle='--')
-                ax.set_title(f'Pronóstico de Demanda Eléctrica: {user_display_start_datetime.strftime("%Y-%m-%d")} a {predictions.index[-1].strftime("%Y-%m-%d")}')
+                ax.set_title(f'Pronóstico de Demanda Eléctrica: {user_display_start_datetime.strftime("%Y-%m-%d %H:%M")} a {predictions.index[-1].strftime("%Y-%m-%d %H:%M")}')
             else:
                 st.warning("No se generaron predicciones para el periodo solicitado.")
                 ax.set_title(f'Pronóstico de Demanda Eléctrica: No se generaron predicciones')
@@ -497,7 +496,14 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
 # --- Historical Performance Section ---
 
-st.header("Análisis de Rendimiento Histórico")
+st.header("Análisis de Rendimiento Histórico (Evaluación del Modelo)")
+st.markdown(
+    """
+    Esta sección muestra el rendimiento del modelo sobre la **última semana de datos históricos disponibles**
+    que no fueron utilizados para el entrenamiento final. No está directamente relacionada con la "Fecha de Inicio del Pronóstico"
+    seleccionada arriba, que es para la proyección futura. Sirve para entender la precisión del modelo en datos que no "vio" durante su ajuste.
+    """
+)
 
 # Re-run backtesting metrics from your script for display
 steps_test = 48 * 7
@@ -605,7 +611,8 @@ else:
 
         predictions_hist.plot(ax=ax_hist, label='Predicción del Modelo (MW)', color='red', linestyle='--')
         
-        ax_hist.set_title('Rendimiento del Modelo en el Conjunto de Prueba')
+        # 🔴 CORRECCIÓN AQUÍ: Título más descriptivo para el histórico
+        ax_hist.set_title(f'Rendimiento del Modelo sobre la Última Semana Histórica ({y_test.index.min().strftime("%Y-%m-%d %H:%M")} a {y_test.index.max().strftime("%Y-%m-%d %H:%M")})')
         ax_hist.set_xlabel('Fecha y Hora')
         ax_hist.set_ylabel('Demanda (MW)')
         ax_hist.legend()
@@ -613,6 +620,7 @@ else:
         st.pyplot(fig_hist)
     else:
         st.warning("No se pudo calcular el rendimiento histórico o generar la gráfica debido a la insuficiencia de datos o errores en el procesamiento.")
+
 
 
 
