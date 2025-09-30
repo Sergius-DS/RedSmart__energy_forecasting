@@ -335,7 +335,7 @@ if y is not None:
                 
                 # Plot the gap prediction in blue
                 if not predictions_gap.empty:
-                    predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico y inicio seleccionado)', linewidth=2)
+                    predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico e inicio seleccionado)', linewidth=2)
                     
                 # Plot the actual user-requested forecast in red
                 if not predictions.empty:
