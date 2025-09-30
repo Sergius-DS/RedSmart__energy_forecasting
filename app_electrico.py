@@ -38,10 +38,11 @@ all_translated_days = sorted(DAYS_TRANSLATION.values())
 # 2. Prepend 'dia_' to get the final dummy column names
 all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 
-# Lista de todas las posibles características exógenas
+# Lista de todas as possíveis características exógenas
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
-# 🔴 SOLUCIÓN FINAL: Ordenar alfabéticamente todas las 9 columnas (orden de prueba más probable)
+# 🔴 SOLUÇÃO DEFINITIVA: Forçar a ordenação alfabética, que corresponde à ordem do modelo.
+# ['ciclo', 'dia_0Domingo', 'dia_1Lunes', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
 
@@ -121,7 +122,6 @@ def train_forecaster(y_train, x_train):
     regressor = XGBRegressor(
         n_estimators=250,
         max_depth=8,
-        # CORRECCIÓN DE TYPO
         learning_rate=0.05,
         random_state=123,
         n_jobs=-1
@@ -135,7 +135,6 @@ def train_forecaster(y_train, x_train):
     forecaster.fit(y=y_train, exog=x_train)
     
     # Store the columns used during fit in session_state for later comparison
-    # This is a robust workaround for older skforecast versions
     st.session_state['fit_exog_cols'] = x_train.columns.tolist()
     st.sidebar.write(f"DEBUG (Fit): Columnas exógenas usadas para entrenar: {st.session_state['fit_exog_cols']}")
     
@@ -244,16 +243,17 @@ if st.button(f"Generar Pronóstico para {time_label}"):
 
         st.sidebar.write(f"DEBUG (Predict): Columnas exógenas para la predicción: {predict_cols_list}")
 
+        # Se espera que agora a lista seja idêntica
         if fit_cols_list != predict_cols_list:
-            st.error("❌ ERROR: ¡Se detectó una discrepancia en las columnas exógenas antes de la predicción!")
-            st.error(f"Columnas usadas durante el ENTRENAMIENTO: {fit_cols_list}")
-            st.error(f"Columnas generadas para la PREDICCIÓN: {predict_cols_list}")
-            st.warning("El orden y nombres DEBEN ser IDÉNTICOS para skforecast. La aplicación se detuvo. Copie estas dos listas de columnas.")
-            st.stop() # Detener la app para mostrar claramente el error
+            st.error("❌ ERRO: Foi detectada uma discrepância nas colunas exógenas ANTES da previsão!")
+            st.error(f"Colunas usadas durante o TREINAMENTO: {fit_cols_list}")
+            st.error(f"Colunas geradas para a PREVISÃO: {predict_cols_list}")
+            st.warning("A ordem e os nomes DEVEM ser IDÊNTICOS. Isso não deveria acontecer agora. Verifique a ordem na função create_exogenous_features.")
+            st.stop()
         else:
-            st.sidebar.write("DEBUG: La comprobación manual de columnas exógenas pasó. Los nombres y el orden son idénticos.")
+            st.sidebar.write("✅ DEBUG: A verificação manual de colunas exógenas passou. Nomes e ordem são idênticos.")
 
-        # 2. Make Prediction (Should now work with the correct column order)
+        # 2. Make Prediction (Agora deve funcionar com a ordem correta)
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -328,9 +328,7 @@ x_train = exog[:-steps_test]
 
 @st.cache_resource(show_spinner="Calculando rendimiento histórico...")
 def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
-    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, 
-                                  # CORRECCIÓN DE TYPO
-                                  learning_rate=0.05, random_state=123, n_jobs=-1)
+    regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
     forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
     forecaster_hist.fit(y=y_t, exog=x_t)
     # Store history fit columns for debugging purposes as well
