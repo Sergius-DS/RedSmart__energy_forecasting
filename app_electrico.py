@@ -33,6 +33,16 @@ DAYS_TRANSLATION = {
     'Sunday': '0Domingo'
 }
 
+# 🔴 FIX: Define the required columns and their exact order for the forecaster
+# This order must be consistent for both training and prediction.
+# The day dummies are listed in numeric order (0 to 6).
+REQUIRED_EXOG_COLS = [
+    'ciclo',
+    'feriado',
+    'dia_0Domingo', 'dia_1Lunes', 'dia_2Martes', 'dia_3Miércoles',
+    'dia_4Jueves', 'dia_5Viernes', 'dia_6Sábado'
+]
+
 # --- Feature Engineering Functions ---
 
 def create_exogenous_features(data):
@@ -55,6 +65,7 @@ def create_exogenous_features(data):
     # Using a broad range of years for the holidays instance
     start_year = data_with_features.index.min().year - 1
     end_year = data_with_features.index.max().year + 2
+    # Ensure holidays are only checked for the normalized date index
     pe = holidays.Peru(years=range(start_year, end_year), observed=True)
     data_with_features['feriado'] = data_with_features.index.normalize().isin(pe).astype(int)
 
@@ -64,24 +75,16 @@ def create_exogenous_features(data):
     else:
         exog = data_with_features
         
-    # Ensure all 7 day dummy columns are present, filling with 0 if necessary
-    all_day_cols = [f'dia_{d}' for d in DAYS_TRANSLATION.values()]
-    for col in all_day_cols:
+    # 🔴 FIX IMPLEMENTATION: Ensure all required columns are present and ordered correctly
+    
+    # 1. Ensure all columns in REQUIRED_EXOG_COLS exist in the prediction data
+    for col in REQUIRED_EXOG_COLS:
         if col not in exog.columns:
+            # If a day dummy (or other feature) is missing, add it and set to 0
             exog[col] = 0
             
-    # Reorder columns to match the training data order (optional but good practice)
-    # Based on your script, the order is 'ciclo', then 'feriado', then 'dia_' dummies.
-    # The 'dia_' columns are sorted alphabetically by the dummy name.
-    
-    # We will let the forecaster handle the column alignment, 
-    # but for consistent prediction, we ensure the set of columns is correct.
-    
-    # The list of columns must be consistent between training and prediction
-    # For a real deployed app, you'd store the training column order.
-    # Here, we ensure the minimal set is present:
-    required_cols = ['ciclo', 'feriado'] + all_day_cols
-    exog = exog[required_cols]
+    # 2. Reorder columns to match the training data's expected order
+    exog = exog[REQUIRED_EXOG_COLS]
 
     return exog
 
@@ -102,8 +105,9 @@ def load_and_preprocess_data():
     data = data.asfreq(f"{TIME_STEP_MINUTES}min")
 
     # Split data: The entire dataset is used for training the final model.
-    # In a real scenario, we'd only use data up to a 'current' date.
     y = data['Demand'].copy()
+    
+    # Create exogenous features for the full training set (the FIX applies here too!)
     exog = create_exogenous_features(data[['Demand']])
 
     return y, exog
@@ -129,6 +133,7 @@ def train_forecaster(y_train, x_train):
         lags=LAG_STEPS # 96 half-hours (2 days)
     )
 
+    # Training uses the fixed and ordered x_train
     forecaster.fit(y=y_train, exog=x_train)
     return forecaster
 
@@ -136,9 +141,6 @@ def train_forecaster(y_train, x_train):
 
 def generate_prediction_exog(start_date, steps):
     """Generates a future date range and the required exogenous variables."""
-    # Determine the end date of the prediction range
-    end_date = start_date + pd.Timedelta(minutes=steps * TIME_STEP_MINUTES)
-
     # Create the future date range
     future_index = pd.date_range(
         start=start_date,
@@ -149,7 +151,7 @@ def generate_prediction_exog(start_date, steps):
     # Create an empty DataFrame with the future index
     future_data = pd.DataFrame(index=future_index)
 
-    # Generate exogenous features for the future period
+    # Generate exogenous features for the future period (the FIX applies here too!)
     exog_pred = create_exogenous_features(future_data)
 
     return exog_pred
@@ -236,9 +238,11 @@ if st.button(f"Generar Pronóstico para {time_label}"):
     with st.spinner(f"Calculando pronóstico de {time_label}..."):
 
         # 1. Generate Exogenous Variables for the Future Period
+        # This call now guarantees correct column order/set
         exog_pred = generate_prediction_exog(start_datetime, steps)
 
         # 2. Make Prediction
+        # This will now successfully align with the forecaster's expected exog columns
         predictions = forecaster.predict(steps=steps, exog=exog_pred)
 
         # 3. Display Results
@@ -319,6 +323,7 @@ def get_historical_predictions(y_t, x_t, y_test_data, x_test_data):
     regressor_hist = XGBRegressor(n_estimators=250, max_depth=8, learning_rate=0.05, random_state=123, n_jobs=-1)
     forecaster_hist = ForecasterRecursive(regressor=regressor_hist, lags=LAG_STEPS)
     forecaster_hist.fit(y=y_t, exog=x_t)
+    # The x_test data here also benefits from the column ordering fix
     predictions_hist = forecaster_hist.predict(steps=len(y_test_data), exog=x_test_data)
     return predictions_hist
 
