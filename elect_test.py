@@ -350,7 +350,7 @@ if y is not None:
                         y=predictions_gap.values, 
                         mode='lines', 
                         line=dict(color='blue', dash='dash', width=2), 
-                        name='Pronóstico (entre histórico y inicio seleccionado)'
+                        name='Pronóstico (entre histórico e inicio seleccionado)'
                     ))
                     
                 # 3. User-Requested Forecast Trace (Rojo, Discontinua)
