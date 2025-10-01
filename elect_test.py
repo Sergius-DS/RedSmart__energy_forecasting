@@ -421,7 +421,7 @@ if y is not None:
                         yaxis_title='Demanda (MW)',
                         legend=dict(yanchor="bottom", y=1.00, xanchor="left", x=0.01, orientation='h'), # Consistencia
                         height=600, 
-                        margin=dict(t=20) # Consistencia
+                        margin=dict(t=60) # Consistencia
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
