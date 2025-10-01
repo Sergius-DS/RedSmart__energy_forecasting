@@ -3,6 +3,10 @@
 
 Este proyecto implementa un flujo completo de **forecasting de series temporales** para la demanda eléctrica en Perú, utilizando la librería [**skforecast**](https://skforecast.org/). El objetivo es comparar un modelo **univariado** (solo lags de la serie) contra un modelo **multivariado** (lags + variables exógenas de calendario).
 
+## Contenido del proyecto 
+
+- 🤖 **Deploy:** Modelo de Machine Learning. [Deploy](https://redsmartenergyforecasting-bzadnqof3sjqbbya7dqiuc.streamlit.app//)
+
 ## 🚀 Flujo del proyecto
 
 1. **Carga y preparación de datos**
