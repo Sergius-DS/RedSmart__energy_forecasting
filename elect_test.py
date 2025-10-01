@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+# Se reemplaza matplotlib por plotly
+import plotly.graph_objects as go 
 import holidays
 from xgboost import XGBRegressor
 from skforecast.recursive import ForecasterRecursive
@@ -42,7 +43,6 @@ all_day_dummy_cols = [f'dia_{d}' for d in all_translated_days]
 ALL_FEATURES = ['ciclo', 'feriado'] + all_day_dummy_cols
 
 # Force alphabetical ordering, which corresponds to the model's order.
-# Ordem de colunas esperada: ['ciclo', 'dia_0Domingo', ..., 'dia_6Sábado', 'feriado']
 REQUIRED_EXOG_COLS = sorted(ALL_FEATURES)
 
 
@@ -314,44 +314,80 @@ if y is not None:
                 user_horizon_steps
             )
             
-            # --- Display results - Plot first ---
+            # -----------------------------------------------------------
+            # --- Plotly Graph (Reemplaza Matplotlib) ---
+            # -----------------------------------------------------------
             st.subheader(f"Gráfica de Pronóstico - {horizon}")
-            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            fig = go.Figure()
 
-            # 🔴 GRÁFICO OPTIMIZADO: Mostrar solo contexto histórico relevante + predicción dividida
             if not y.empty and not predictions_full.empty:
                 context_days = 7  # Show last 7 days of historical data
                 context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
                 
                 y_context = y.loc[context_start:y.index[-1]]
                 
-                if not y_context.empty: # Plot only if there's actual context data
-                    y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7, linewidth=1.5)
-                    
                 # Define the gap prediction (from historical end to user's display start)
                 predictions_gap = predictions_full.loc[
                     skforecast_predict_start_datetime : user_display_start_datetime - pd.Timedelta(minutes=TIME_STEP_MINUTES)
                 ]
                 
-                # Plot the gap prediction in blue
+                # --- Add Traces ---
+                # 1. Historical Context Trace (Gris)
+                if not y_context.empty:
+                    fig.add_trace(go.Scatter(
+                        x=y_context.index, 
+                        y=y_context.values, 
+                        mode='lines', 
+                        line=dict(color='gray', width=1.5), 
+                        name='Demanda Histórica (MW)'
+                    ))
+                    
+                # 2. Prediction Gap Trace (Azul, Discontinua)
                 if not predictions_gap.empty:
-                    predictions_gap.plot(ax=ax, color='blue', linestyle='--', label='Pronóstico (entre histórico e inicio seleccionado)', linewidth=2)
+                    fig.add_trace(go.Scatter(
+                        x=predictions_gap.index, 
+                        y=predictions_gap.values, 
+                        mode='lines', 
+                        line=dict(color='blue', dash='dash', width=2), 
+                        name='Pronóstico (entre histórico y inicio seleccionado)'
+                    ))
                     
-                # Plot the actual user-requested forecast in red
+                # 3. User-Requested Forecast Trace (Rojo, Discontinua)
                 if not predictions.empty:
-                    predictions.plot(ax=ax, color='red', linestyle='--', label=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)', linewidth=2)
+                    fig.add_trace(go.Scatter(
+                        x=predictions.index, 
+                        y=predictions.values, 
+                        mode='lines', 
+                        line=dict(color='red', dash='dash', width=2), 
+                        name=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)'
+                    ))
                     
-                # Add vertical line to show where historical data ends
-                ax.axvline(x=y.index[-1], color='blue', linestyle=':', alpha=0.8, label='Fin datos históricos', linewidth=2)
-                
-                # Set appropriate x-axis limits to focus on the relevant period
+                # 4. Add Vertical Line (End of Historical Data)
+                fig.add_vline(
+                    x=y.index[-1], 
+                    line_width=2, 
+                    line_dash="dot", 
+                    line_color="blue", 
+                    name='Fin datos históricos'
+                )
+
+                # Set appropriate x-axis limits and Title
                 plot_start_limit = context_start
                 if not predictions_gap.empty: 
                     plot_start_limit = min(context_start, predictions_gap.index.min())
                 
-                ax.set_xlim(plot_start_limit, predictions_full.index[-1])
+                plot_end_limit = predictions_full.index[-1]
                 
-                ax.set_title(f'Demanda Eléctrica: Histórico Reciente y Pronóstico\n{plot_start_limit.strftime("%d/%m/%Y %H:%M")} - {predictions_full.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                fig.update_layout(
+                    title=f'Demanda Eléctrica: Histórico Reciente y Pronóstico<br>{plot_start_limit.strftime("%d/%m/%Y %H:%M")} - {plot_end_limit.strftime("%d/%m/%Y %H:%M")}',
+                    xaxis_title='Fecha y Hora',
+                    yaxis_title='Demanda (MW)',
+                    xaxis=dict(range=[plot_start_limit, plot_end_limit]),
+                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                    hovermode="x unified",
+                    height=500
+                )
 
             elif not y.empty: # Only historical data available (no predictions)
                 context_days = 30
@@ -359,23 +395,31 @@ if y is not None:
                 y_context = y.loc[context_start:y.index[-1]]
                 
                 if not y_context.empty:
-                    y_context.plot(ax=ax, label='Demanda Histórica (MW)', color='gray', alpha=0.7)
-                    ax.set_title(f'Demanda Eléctrica Histórica (Últimos {context_days} días)\n{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}')
+                    fig.add_trace(go.Scatter(
+                        x=y_context.index, 
+                        y=y_context.values, 
+                        mode='lines', 
+                        line=dict(color='gray', width=1.5), 
+                        name='Demanda Histórica (MW)'
+                    ))
+                    fig.update_layout(
+                        title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
+                        xaxis_title='Fecha y Hora',
+                        yaxis_title='Demanda (MW)',
+                        height=500
+                    )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
-                    ax.set_title('No hay datos para mostrar')
+                    fig.update_layout(title='No hay datos para mostrar', height=500)
             else: # No historical data
                 st.warning("No hay datos históricos ni predicciones para mostrar.")
-                ax.set_title('No hay datos para mostrar')
+                fig.update_layout(title='No hay datos para mostrar', height=500)
 
-            ax.set_xlabel('Fecha y Hora')
-            ax.set_ylabel('Demanda (MW)')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
-
+            # Usar st.plotly_chart para renderizar la figura interactiva
+            st.plotly_chart(fig, use_container_width=True)
+            
             # -----------------------------------------------------------
-            # --- Statistics in 2 columns below the plot (NEW SECTION) ---
+            # --- Statistics in 2 columns below the plot ---
             # -----------------------------------------------------------
             st.subheader("Estadísticas del Pronóstico")
             col_stat1, col_stat2 = st.columns(2)
