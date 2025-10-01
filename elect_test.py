@@ -399,7 +399,7 @@ if y is not None:
                     ),
                     hovermode="x unified",
                     height=700,
-                    margin=dict(t=70) # AUMENTA EL MARGEN SUPERIOR A 220
+                    margin=dict(t=90) # AUMENTA EL MARGEN SUPERIOR A 220
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
