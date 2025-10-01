@@ -315,10 +315,24 @@ if y is not None:
             )
             
             # -----------------------------------------------------------
-            # --- Plotly Graph (Reemplaza Matplotlib) ---
+            # --- Plotly Graph Section Header with Image (MODIFICACIÓN) ---
             # -----------------------------------------------------------
-            st.subheader(f"Gráfica de Pronóstico - {horizon}")
             
+            # 1. Crear columnas para el encabezado y la imagen
+            col_title, col_image = st.columns([4, 1]) 
+            
+            with col_title:
+                st.subheader(f"Gráfica de Pronóstico - {horizon}")
+            
+            with col_image:
+                try:
+                    # 2. Colocar la imagen
+                    st.image("historico.png", caption="Histórico", width=100)
+                except FileNotFoundError:
+                    st.warning("Advertencia: No se encontró el archivo 'historico.png'. Asegúrese de que esté en el mismo directorio.")
+
+
+            # --- Plotly Graph Code ---
             fig = go.Figure()
 
             if not y.empty and not predictions_full.empty:
@@ -350,7 +364,7 @@ if y is not None:
                         y=predictions_gap.values, 
                         mode='lines', 
                         line=dict(color='blue', dash='dash', width=2), 
-                        name='Pronóstico (entre histórico e inicio seleccionado)'
+                        name='Pronóstico (entre histórico y inicio seleccionado)'
                     ))
                     
                 # 3. User-Requested Forecast Trace (Rojo, Discontinua)
@@ -409,10 +423,8 @@ if y is not None:
                         height=500
                     )
                 else:
-                    st.warning("No hay datos históricos para mostrar.")
                     fig.update_layout(title='No hay datos para mostrar', height=500)
             else: # No historical data
-                st.warning("No hay datos históricos ni predicciones para mostrar.")
                 fig.update_layout(title='No hay datos para mostrar', height=500)
 
             # Usar st.plotly_chart para renderizar la figura interactiva
