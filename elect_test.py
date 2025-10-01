@@ -315,10 +315,24 @@ if y is not None:
             )
             
             # -----------------------------------------------------------
-            # --- Plotly Graph (Reemplaza Matplotlib) ---
+            # --- Plotly Graph Section Header with Image (MODIFICACIÓN) ---
             # -----------------------------------------------------------
-            st.subheader(f"Gráfica de Pronóstico - {horizon}")
             
+            # 1. Crear columnas para el encabezado y la imagen
+            col_title, col_image = st.columns([4, 1]) 
+            
+            with col_title:
+                st.subheader(f"Gráfica de Pronóstico - {horizon}")
+            
+            with col_image:
+                try:
+                    # 2. Colocar la imagen
+                    st.image("historico.png", caption="Histórico", width=100)
+                except FileNotFoundError:
+                    st.warning("Advertencia: No se encontró el archivo 'historico.png'. Asegúrese de que esté en el mismo directorio.")
+
+
+            # --- Plotly Graph Code ---
             fig = go.Figure()
 
             if not y.empty and not predictions_full.empty:
@@ -333,7 +347,7 @@ if y is not None:
                 ]
                 
                 # --- Add Traces ---
-                # 1. Historical Context Trace (Gris)
+                # 1. Historical Context Trace (Gris) - Line width kept at 1.5
                 if not y_context.empty:
                     fig.add_trace(go.Scatter(
                         x=y_context.index, 
@@ -343,23 +357,23 @@ if y is not None:
                         name='Demanda Histórica (MW)'
                     ))
                     
-                # 2. Prediction Gap Trace (Azul, Discontinua)
+                # 2. Prediction Gap Trace (Azul, Discontinua) - Increased line width to 2.5
                 if not predictions_gap.empty:
                     fig.add_trace(go.Scatter(
                         x=predictions_gap.index, 
                         y=predictions_gap.values, 
                         mode='lines', 
-                        line=dict(color='blue', dash='dash', width=2), 
+                        line=dict(color='blue', dash='dash', width=2.5), 
                         name='Pronóstico (entre histórico y inicio seleccionado)'
                     ))
                     
-                # 3. User-Requested Forecast Trace (Rojo, Discontinua)
+                # 3. User-Requested Forecast Trace (Rojo, Discontinua) - Increased line width to 2.5
                 if not predictions.empty:
                     fig.add_trace(go.Scatter(
                         x=predictions.index, 
                         y=predictions.values, 
                         mode='lines', 
-                        line=dict(color='red', dash='dash', width=2), 
+                        line=dict(color='red', dash='dash', width=2.5), 
                         name=f'Pronóstico {horizon} (MW) (desde inicio seleccionado)'
                     ))
                     
@@ -386,7 +400,7 @@ if y is not None:
                     xaxis=dict(range=[plot_start_limit, plot_end_limit]),
                     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                     hovermode="x unified",
-                    height=500
+                    height=650 # Increased height from 500 to 650
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -406,14 +420,14 @@ if y is not None:
                         title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
-                        height=500
+                        height=650 # Increased height
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
-                    fig.update_layout(title='No hay datos para mostrar', height=500)
+                    fig.update_layout(title='No hay datos para mostrar', height=650)
             else: # No historical data
                 st.warning("No hay datos históricos ni predicciones para mostrar.")
-                fig.update_layout(title='No hay datos para mostrar', height=500)
+                fig.update_layout(title='No hay datos para mostrar', height=650)
 
             # Usar st.plotly_chart para renderizar la figura interactiva
             st.plotly_chart(fig, use_container_width=True)
@@ -461,18 +475,3 @@ if y is not None:
                 st.download_button(
                     "📥 Descargar CSV",
                     data=csv,
-                    file_name=f'pronostico_demanda_{user_display_start_datetime.strftime("%Y%m%d")}.csv',
-                    mime='text/csv'
-                )
-            else:
-                st.warning("No hay pronósticos para mostrar o descargar.")
-    
-    # Model info
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Información del Modelo:**")
-    st.sidebar.markdown(f"• Lags utilizados: {LAG_STEPS}")
-    st.sidebar.markdown(f"• Último dato histórico: {y.index[-1].strftime('%d/%m/%Y %H:%M')}")
-    st.sidebar.markdown(f"• Total de datos históricos: {len(y):,}")
-    
-else:
-    st.error("No se pudieron cargar los datos. Verifique que el archivo Excel esté en el directorio correcto.")
