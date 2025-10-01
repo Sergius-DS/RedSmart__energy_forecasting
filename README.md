@@ -5,6 +5,12 @@ Este proyecto implementa un flujo completo de **forecasting de series temporales
 
 ## 🤖 Despliegue del proyecto 
 
+Se creó una aplicación es un sistema completo de pronóstico de demanda eléctrica alojado en un dashboard de Streamlit.
+
+El núcleo del sistema es un modelo avanzado de Machine Learning (XGBoost) que, utilizando la librería skforecast, realiza predicciones recursivas de alta precisión. La clave de su exactitud reside en una ingeniería de características inteligente que inyecta información contextual al modelo, como los patrones del ciclo diario, el día de la semana y el impacto de los feriados nacionales.
+
+Ofrece una Experiencia de Usuario (UX) totalmente intuitiva que permite configurar el horizonte de pronóstico (de 1 día a 1 mes) sin necesidad de código. Finalmente, proporciona una triple validación de resultados mediante: gráficos interactivos (Plotly), estadísticas operativas (pico, valle, promedio) y una tabla de datos descargable, convirtiendo los datos brutos en inteligencia de negocio lista para la planificación y toma de decisiones.
+
 - **Modelo de Machine Learning:** [Deploy](https://redsmartenergyforecasting-bzadnqof3sjqbbya7dqiuc.streamlit.app//)
 
 ## 🚀 Flujo del proyecto
