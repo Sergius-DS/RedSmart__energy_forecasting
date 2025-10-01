@@ -327,7 +327,7 @@ if y is not None:
             fig = go.Figure()
 
             if not y.empty and not predictions_full.empty:
-                context_days = 7  # Show last 7 days of historical data
+                context_days = 7 # Show last 7 days of historical data
                 context_start = max(y.index.min(), y.index[-1] - pd.Timedelta(days=context_days))
                 
                 y_context = y.loc[context_start:y.index[-1]]
@@ -389,10 +389,17 @@ if y is not None:
                     xaxis_title='Fecha y Hora',
                     yaxis_title='Demanda (MW)',
                     xaxis=dict(range=[plot_start_limit, plot_end_limit]),
-                    legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+                    # --- CAMBIOS CLAVE EN LA LEYENDA ---
+                    legend=dict(
+                        yanchor="bottom", # Ancla la parte inferior de la leyenda
+                        y=1.00, # Posiciona la parte inferior justo en el borde superior del gráfico (lo mueve fuera del área de trazado)
+                        xanchor="left", 
+                        x=0.01,
+                        orientation='h' # Hace la leyenda horizontal
+                    ),
                     hovermode="x unified",
-                    height=700, # AUMENTA LA ALTURA DEL GRÁFICO (de 650 a 700)
-                    margin=dict(t=160) # AUMENTA EL MARGEN SUPERIOR (de 120 a 160)
+                    height=700,
+                    margin=dict(t=220) # AUMENTA EL MARGEN SUPERIOR A 220
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -412,8 +419,9 @@ if y is not None:
                         title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
-                        height=700, # AUMENTA LA ALTURA
-                        margin=dict(t=160) # AUMENTA EL MARGEN SUPERIOR
+                        legend=dict(yanchor="bottom", y=1.00, xanchor="left", x=0.01, orientation='h'), # Consistencia
+                        height=700, 
+                        margin=dict(t=220) # Consistencia
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
