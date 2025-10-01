@@ -398,7 +398,7 @@ if y is not None:
                         orientation='h' # Hace la leyenda horizontal
                     ),
                     hovermode="x unified",
-                    height=700,
+                    height=600,
                     margin=dict(t=110) # AUMENTA EL MARGEN SUPERIOR A 220
                 )
 
@@ -420,15 +420,15 @@ if y is not None:
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
                         legend=dict(yanchor="bottom", y=1.00, xanchor="left", x=0.01, orientation='h'), # Consistencia
-                        height=700, 
+                        height=600, 
                         margin=dict(t=30) # Consistencia
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
-                    fig.update_layout(title='No hay datos para mostrar', height=700)
+                    fig.update_layout(title='No hay datos para mostrar', height=600)
             else: # No historical data
                 st.warning("No hay datos históricos ni predicciones para mostrar.")
-                fig.update_layout(title='No hay datos para mostrar', height=700)
+                fig.update_layout(title='No hay datos para mostrar', height=600)
 
             # Usar st.plotly_chart para renderizar la figura interactiva
             st.plotly_chart(fig, use_container_width=True)
