@@ -321,7 +321,7 @@ if y is not None:
             st.subheader(f"Gráfica de Pronóstico - {horizon}")
             
             # Espacio vertical para separar el título de la gráfica (mantiene el 'lift' visual)
-            st.markdown("<br>", unsafe_allow_html=True)
+            #st.markdown("<br>", unsafe_allow_html=True)
 
             # --- Plotly Graph Code ---
             fig = go.Figure()
