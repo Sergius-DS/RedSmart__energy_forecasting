@@ -399,7 +399,7 @@ if y is not None:
                     ),
                     hovermode="x unified",
                     height=550,
-                    margin=dict(t=90) # AUMENTA EL MARGEN SUPERIOR A 120
+                    margin=dict(t=96) # AUMENTA EL MARGEN SUPERIOR A 120
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -421,7 +421,7 @@ if y is not None:
                         yaxis_title='Demanda (MW)',
                         legend=dict(yanchor="bottom", y=1.00, xanchor="left", x=0.01, orientation='h'), # Consistencia
                         height=550, 
-                        margin=dict(t=88) # Consistencia 190
+                        margin=dict(t=99) # Consistencia 190
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
