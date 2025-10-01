@@ -475,3 +475,18 @@ if y is not None:
                 st.download_button(
                     "📥 Descargar CSV",
                     data=csv,
+                    file_name=f'pronostico_demanda_{user_display_start_datetime.strftime("%Y%m%d")}.csv',
+                    mime='text/csv'
+                )
+            else:
+                st.warning("No hay pronósticos para mostrar o descargar.")
+    
+    # Model info
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Información del Modelo:**")
+    st.sidebar.markdown(f"• Lags utilizados: {LAG_STEPS}")
+    st.sidebar.markdown(f"• Último dato histórico: {y.index[-1].strftime('%d/%m/%Y %H:%M')}")
+    st.sidebar.markdown(f"• Total de datos históricos: {len(y):,}")
+    
+else:
+    st.error("No se pudieron cargar los datos. Verifique que el archivo Excel esté en el directorio correcto.")
