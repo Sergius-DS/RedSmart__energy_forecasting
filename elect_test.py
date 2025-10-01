@@ -392,7 +392,7 @@ if y is not None:
                     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                     hovermode="x unified",
                     height=700, # AUMENTA LA ALTURA DEL GRÁFICO (de 650 a 700)
-                    margin=dict(t=160) # AUMENTA EL MARGEN SUPERIOR (de 120 a 160)
+                    margin=dict(t=200) # AUMENTA EL MARGEN SUPERIOR (de 120 a 160)
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
