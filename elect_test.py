@@ -326,11 +326,13 @@ if y is not None:
             
             with col_image:
                 try:
-                    # 2. Colocar la imagen
-                    st.image("historico.png", caption="Histórico", width=100)
+                    # 2. Colocar la imagen (se elimina el 'caption')
+                    st.image("historico.png", width=100)
                 except FileNotFoundError:
                     st.warning("Advertencia: No se encontró el archivo 'historico.png'. Asegúrese de que esté en el mismo directorio.")
 
+            # Espacio vertical para separar el título de la gráfica (para el requisito de los 26px)
+            st.markdown("<br>", unsafe_allow_html=True)
 
             # --- Plotly Graph Code ---
             fig = go.Figure()
@@ -347,7 +349,7 @@ if y is not None:
                 ]
                 
                 # --- Add Traces ---
-                # 1. Historical Context Trace (Gris) - Line width kept at 1.5
+                # 1. Historical Context Trace (Gris) - Line width: 1.5
                 if not y_context.empty:
                     fig.add_trace(go.Scatter(
                         x=y_context.index, 
@@ -357,7 +359,7 @@ if y is not None:
                         name='Demanda Histórica (MW)'
                     ))
                     
-                # 2. Prediction Gap Trace (Azul, Discontinua) - Increased line width to 2.5
+                # 2. Prediction Gap Trace (Azul, Discontinua) - Line width: 2.5 (Thicker for visibility)
                 if not predictions_gap.empty:
                     fig.add_trace(go.Scatter(
                         x=predictions_gap.index, 
@@ -367,7 +369,7 @@ if y is not None:
                         name='Pronóstico (entre histórico y inicio seleccionado)'
                     ))
                     
-                # 3. User-Requested Forecast Trace (Rojo, Discontinua) - Increased line width to 2.5
+                # 3. User-Requested Forecast Trace (Rojo, Discontinua) - Line width: 2.5 (Thicker for visibility)
                 if not predictions.empty:
                     fig.add_trace(go.Scatter(
                         x=predictions.index, 
@@ -400,7 +402,7 @@ if y is not None:
                     xaxis=dict(range=[plot_start_limit, plot_end_limit]),
                     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                     hovermode="x unified",
-                    height=650 # Increased height from 500 to 650
+                    height=650 # Height increased in previous step
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -420,7 +422,7 @@ if y is not None:
                         title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
-                        height=650 # Increased height
+                        height=650
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
