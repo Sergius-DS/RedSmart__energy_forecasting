@@ -315,23 +315,13 @@ if y is not None:
             )
             
             # -----------------------------------------------------------
-            # --- Plotly Graph Section Header with Image (MODIFICACIÓN PARA SEPARACIÓN) ---
+            # --- Plotly Graph Section Header (CORREGIDO: Imagen eliminada) ---
             # -----------------------------------------------------------
             
-            # 1. Crear columnas para el encabezado y la imagen
-            col_title, col_image = st.columns([4, 1]) 
+            # Se elimina la lógica de las columnas y la llamada a st.image("historico.png")
+            st.subheader(f"Gráfica de Pronóstico - {horizon}")
             
-            with col_title:
-                st.subheader(f"Gráfica de Pronóstico - {horizon}")
-            
-            with col_image:
-                try:
-                    # 2. Colocar la imagen (se asume que se eliminó el 'caption' anteriormente)
-                    st.image("historico.png", width=100)
-                except FileNotFoundError:
-                    st.warning("Advertencia: No se encontró el archivo 'historico.png'. Asegúrese de que esté en el mismo directorio.")
-
-            # 3. AÑADIR ESPACIO VERTICAL para separar el título de la gráfica (da la sensación de "subir" el contexto)
+            # Espacio vertical para separar el título de la gráfica (mantiene el 'lift' visual)
             st.markdown("<br>", unsafe_allow_html=True)
 
             # --- Plotly Graph Code ---
@@ -402,8 +392,8 @@ if y is not None:
                     xaxis=dict(range=[plot_start_limit, plot_end_limit]),
                     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                     hovermode="x unified",
-                    height=650, # Aumenta la altura
-                    margin=dict(t=120) # AUMENTA EL MARGEN SUPERIOR para evitar solapamiento
+                    height=650, # Altura generosa
+                    margin=dict(t=120) # Mantiene el margen superior para separar el contexto del área de ploteo
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -423,8 +413,8 @@ if y is not None:
                         title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
-                        height=650, # Aumenta la altura
-                        margin=dict(t=120) # AUMENTA EL MARGEN SUPERIOR
+                        height=650,
+                        margin=dict(t=120)
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
