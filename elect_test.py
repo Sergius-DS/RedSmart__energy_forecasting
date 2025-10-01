@@ -315,10 +315,26 @@ if y is not None:
             )
             
             # -----------------------------------------------------------
-            # --- Plotly Graph (Reemplaza Matplotlib) ---
+            # --- Plotly Graph Section Header with Image (MODIFICACIÓN PARA SEPARACIÓN) ---
             # -----------------------------------------------------------
-            st.subheader(f"Gráfica de Pronóstico - {horizon}")
             
+            # 1. Crear columnas para el encabezado y la imagen
+            col_title, col_image = st.columns([4, 1]) 
+            
+            with col_title:
+                st.subheader(f"Gráfica de Pronóstico - {horizon}")
+            
+            with col_image:
+                try:
+                    # 2. Colocar la imagen (se asume que se eliminó el 'caption' anteriormente)
+                    st.image("historico.png", width=100)
+                except FileNotFoundError:
+                    st.warning("Advertencia: No se encontró el archivo 'historico.png'. Asegúrese de que esté en el mismo directorio.")
+
+            # 3. AÑADIR ESPACIO VERTICAL para separar el título de la gráfica (da la sensación de "subir" el contexto)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # --- Plotly Graph Code ---
             fig = go.Figure()
 
             if not y.empty and not predictions_full.empty:
@@ -386,7 +402,8 @@ if y is not None:
                     xaxis=dict(range=[plot_start_limit, plot_end_limit]),
                     legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
                     hovermode="x unified",
-                    height=500
+                    height=650, # Aumenta la altura
+                    margin=dict(t=120) # AUMENTA EL MARGEN SUPERIOR para evitar solapamiento
                 )
 
             elif not y.empty: # Only historical data available (no predictions)
@@ -406,14 +423,15 @@ if y is not None:
                         title=f'Demanda Eléctrica Histórica (Últimos {context_days} días)<br>{context_start.strftime("%d/%m/%Y %H:%M")} - {y.index[-1].strftime("%d/%m/%Y %H:%M")}',
                         xaxis_title='Fecha y Hora',
                         yaxis_title='Demanda (MW)',
-                        height=500
+                        height=650, # Aumenta la altura
+                        margin=dict(t=120) # AUMENTA EL MARGEN SUPERIOR
                     )
                 else:
                     st.warning("No hay datos históricos para mostrar.")
-                    fig.update_layout(title='No hay datos para mostrar', height=500)
+                    fig.update_layout(title='No hay datos para mostrar', height=650)
             else: # No historical data
                 st.warning("No hay datos históricos ni predicciones para mostrar.")
-                fig.update_layout(title='No hay datos para mostrar', height=500)
+                fig.update_layout(title='No hay datos para mostrar', height=650)
 
             # Usar st.plotly_chart para renderizar la figura interactiva
             st.plotly_chart(fig, use_container_width=True)
