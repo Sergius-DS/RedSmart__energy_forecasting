@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 # Se reemplaza matplotlib por plotly
-import plotly.graph_objects as go 
+import plotly.graph_objects as go
 import holidays
 from xgboost import XGBRegressor
 from skforecast.recursive import ForecasterRecursive
