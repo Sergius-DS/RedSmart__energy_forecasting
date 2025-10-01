@@ -11,7 +11,7 @@ El núcleo del sistema es un modelo avanzado de Machine Learning (XGBoost) que, 
 
 Ofrece una Experiencia de Usuario (UX) totalmente intuitiva que permite configurar el horizonte de pronóstico (de 1 día a 1 mes) sin necesidad de código. Finalmente, proporciona una triple validación de resultados mediante: gráficos interactivos (Plotly), estadísticas operativas (pico, valle, promedio) y una tabla de datos descargable, convirtiendo los datos brutos en inteligencia de negocio lista para la planificación y toma de decisiones.
 
-- **Modelo de Machine Learning:** [Deploy](https://redsmartenergyforecasting-bzadnqof3sjqbbya7dqiuc.streamlit.app//)
+- **Ir a la aplicación en Streamlit:** [Deploy](https://redsmartenergyforecasting-bzadnqof3sjqbbya7dqiuc.streamlit.app//)
 
 ## 🚀 Flujo del proyecto
 
